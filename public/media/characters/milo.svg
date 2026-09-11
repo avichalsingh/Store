@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="800" height="1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg-milo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="55%" stop-color="#121218"/>
+      <stop offset="100%" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <radialGradient id="glow-milo" cx="41%" cy="27%" r="70%">
+      <stop offset="0%" stop-color="#FF5C8A" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#FF5C8A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2-milo" cx="73%" cy="68%" r="55%">
+      <stop offset="0%" stop-color="#FF5C8A" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FF5C8A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="1000" fill="url(#bg-milo)"/>
+  <rect width="800" height="1000" fill="url(#glow-milo)"/>
+  <rect width="800" height="1000" fill="url(#glow2-milo)"/>
+  <circle cx="328" cy="270" r="304" fill="#FF5C8A" opacity="0.16"/>
+  <circle cx="584" cy="680" r="224" fill="#FF5C8A" opacity="0.12"/>
+  <path d="M 144 420 C 256 300, 384 560, 560 380" fill="none" stroke="#FF5C8A" stroke-width="14" stroke-linecap="round" opacity="0.55"/>
+  <path d="M 176 500 C 320 620, 463.99999999999994 360, 640 520" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.22"/>
+  <rect x="64" y="120" width="144" height="6" rx="3" fill="#FF5C8A" opacity="0.9"/>
+</svg>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" width="1400" height="900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg-zara-spotlight-pack" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="55%" stop-color="#121218"/>
+      <stop offset="100%" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <radialGradient id="glow-zara-spotlight-pack" cx="43%" cy="29%" r="70%">
+      <stop offset="0%" stop-color="#7C6CFF" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#7C6CFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2-zara-spotlight-pack" cx="59%" cy="55%" r="55%">
+      <stop offset="0%" stop-color="#7C6CFF" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#7C6CFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1400" height="900" fill="url(#bg-zara-spotlight-pack)"/>
+  <rect width="1400" height="900" fill="url(#glow-zara-spotlight-pack)"/>
+  <rect width="1400" height="900" fill="url(#glow2-zara-spotlight-pack)"/>
+  <circle cx="602" cy="261" r="414" fill="#7C6CFF" opacity="0.16"/>
+  <circle cx="826" cy="495" r="468" fill="#7C6CFF" opacity="0.12"/>
+  <path d="M 252 378 C 448 270, 672 504.00000000000006, 979.9999999999999 342" fill="none" stroke="#7C6CFF" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+  <path d="M 308 450 C 560 558, 812 324, 1120 468" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.22"/>
+  <rect x="112" y="108" width="252" height="6" rx="3" fill="#7C6CFF" opacity="0.9"/>
+</svg>

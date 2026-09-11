@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="800" height="1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg-kai" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="55%" stop-color="#121218"/>
+      <stop offset="100%" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <radialGradient id="glow-kai" cx="37%" cy="42%" r="70%">
+      <stop offset="0%" stop-color="#5B8CFF" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#5B8CFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2-kai" cx="60%" cy="72%" r="55%">
+      <stop offset="0%" stop-color="#5B8CFF" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#5B8CFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="1000" fill="url(#bg-kai)"/>
+  <rect width="800" height="1000" fill="url(#glow-kai)"/>
+  <rect width="800" height="1000" fill="url(#glow2-kai)"/>
+  <circle cx="296" cy="420" r="304" fill="#5B8CFF" opacity="0.16"/>
+  <circle cx="480" cy="720" r="224" fill="#5B8CFF" opacity="0.12"/>
+  <path d="M 144 420 C 256 300, 384 560, 560 380" fill="none" stroke="#5B8CFF" stroke-width="14" stroke-linecap="round" opacity="0.55"/>
+  <path d="M 176 500 C 320 620, 463.99999999999994 360, 640 520" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.22"/>
+  <rect x="64" y="120" width="144" height="6" rx="3" fill="#5B8CFF" opacity="0.9"/>
+</svg>

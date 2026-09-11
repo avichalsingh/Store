@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1280" width="720" height="1280" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg-turbo-tap" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="55%" stop-color="#121218"/>
+      <stop offset="100%" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <radialGradient id="glow-turbo-tap" cx="46%" cy="6%" r="70%">
+      <stop offset="0%" stop-color="#FF5C8A" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#FF5C8A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2-turbo-tap" cx="40%" cy="41%" r="55%">
+      <stop offset="0%" stop-color="#FF5C8A" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FF5C8A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="720" height="1280" fill="url(#bg-turbo-tap)"/>
+  <rect width="720" height="1280" fill="url(#glow-turbo-tap)"/>
+  <rect width="720" height="1280" fill="url(#glow2-turbo-tap)"/>
+  <circle cx="331.2" cy="76.8" r="331.2" fill="#FF5C8A" opacity="0.16"/>
+  <circle cx="288" cy="524.8" r="201.6" fill="#FF5C8A" opacity="0.12"/>
+  <path d="M 129.6 537.6 C 230.4 384, 345.59999999999997 716.8000000000001, 503.99999999999994 486.4" fill="none" stroke="#FF5C8A" stroke-width="14" stroke-linecap="round" opacity="0.55"/>
+  <path d="M 158.4 640 C 288 793.6, 417.59999999999997 460.79999999999995, 576 665.6" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.22"/>
+  <rect x="57.6" y="153.6" width="129.6" height="6" rx="3" fill="#FF5C8A" opacity="0.9"/>
+</svg>

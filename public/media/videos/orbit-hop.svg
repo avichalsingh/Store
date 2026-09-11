@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1280" width="720" height="1280" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg-orbit-hop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="55%" stop-color="#121218"/>
+      <stop offset="100%" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <radialGradient id="glow-orbit-hop" cx="56%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#3DD6C6" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#3DD6C6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2-orbit-hop" cx="44%" cy="34%" r="55%">
+      <stop offset="0%" stop-color="#3DD6C6" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#3DD6C6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="720" height="1280" fill="url(#bg-orbit-hop)"/>
+  <rect width="720" height="1280" fill="url(#glow-orbit-hop)"/>
+  <rect width="720" height="1280" fill="url(#glow2-orbit-hop)"/>
+  <circle cx="403.2" cy="0" r="331.2" fill="#3DD6C6" opacity="0.16"/>
+  <circle cx="316.8" cy="435.2" r="201.6" fill="#3DD6C6" opacity="0.12"/>
+  <path d="M 129.6 537.6 C 230.4 384, 345.59999999999997 716.8000000000001, 503.99999999999994 486.4" fill="none" stroke="#3DD6C6" stroke-width="14" stroke-linecap="round" opacity="0.55"/>
+  <path d="M 158.4 640 C 288 793.6, 417.59999999999997 460.79999999999995, 576 665.6" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.22"/>
+  <rect x="57.6" y="153.6" width="129.6" height="6" rx="3" fill="#3DD6C6" opacity="0.9"/>
+</svg>

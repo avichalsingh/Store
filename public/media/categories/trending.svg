@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg-trending" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="55%" stop-color="#121218"/>
+      <stop offset="100%" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <radialGradient id="glow-trending" cx="55%" cy="20%" r="70%">
+      <stop offset="0%" stop-color="#FF5C8A" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#FF5C8A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2-trending" cx="65%" cy="56%" r="55%">
+      <stop offset="0%" stop-color="#FF5C8A" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FF5C8A" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bg-trending)"/>
+  <rect width="1200" height="800" fill="url(#glow-trending)"/>
+  <rect width="1200" height="800" fill="url(#glow2-trending)"/>
+  <circle cx="660" cy="160" r="368" fill="#FF5C8A" opacity="0.16"/>
+  <circle cx="780" cy="448" r="416" fill="#FF5C8A" opacity="0.12"/>
+  <path d="M 216 336 C 384 240, 576 448.00000000000006, 840 304" fill="none" stroke="#FF5C8A" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+  <path d="M 264 400 C 480 496, 696 288, 960 416" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.22"/>
+  <rect x="96" y="96" width="216" height="6" rx="3" fill="#FF5C8A" opacity="0.9"/>
+</svg>

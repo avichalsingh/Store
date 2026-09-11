@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" width="1400" height="900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg-cute-and-fun-pack" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="55%" stop-color="#121218"/>
+      <stop offset="100%" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <radialGradient id="glow-cute-and-fun-pack" cx="49%" cy="12%" r="70%">
+      <stop offset="0%" stop-color="#3DD6C6" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#3DD6C6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2-cute-and-fun-pack" cx="37%" cy="48%" r="55%">
+      <stop offset="0%" stop-color="#3DD6C6" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#3DD6C6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1400" height="900" fill="url(#bg-cute-and-fun-pack)"/>
+  <rect width="1400" height="900" fill="url(#glow-cute-and-fun-pack)"/>
+  <rect width="1400" height="900" fill="url(#glow2-cute-and-fun-pack)"/>
+  <circle cx="686" cy="108" r="414" fill="#3DD6C6" opacity="0.16"/>
+  <circle cx="518" cy="432" r="468" fill="#3DD6C6" opacity="0.12"/>
+  <path d="M 252 378 C 448 270, 672 504.00000000000006, 979.9999999999999 342" fill="none" stroke="#3DD6C6" stroke-width="10" stroke-linecap="round" opacity="0.55"/>
+  <path d="M 308 450 C 560 558, 812 324, 1120 468" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.22"/>
+  <rect x="112" y="108" width="252" height="6" rx="3" fill="#3DD6C6" opacity="0.9"/>
+</svg>

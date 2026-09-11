@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="800" height="1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="bg-leo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a22"/>
+      <stop offset="55%" stop-color="#121218"/>
+      <stop offset="100%" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <radialGradient id="glow-leo" cx="48%" cy="38%" r="70%">
+      <stop offset="0%" stop-color="#3DD6C6" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#3DD6C6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2-leo" cx="77%" cy="49%" r="55%">
+      <stop offset="0%" stop-color="#3DD6C6" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#3DD6C6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="1000" fill="url(#bg-leo)"/>
+  <rect width="800" height="1000" fill="url(#glow-leo)"/>
+  <rect width="800" height="1000" fill="url(#glow2-leo)"/>
+  <circle cx="384" cy="380" r="304" fill="#3DD6C6" opacity="0.16"/>
+  <circle cx="616" cy="490" r="224" fill="#3DD6C6" opacity="0.12"/>
+  <path d="M 144 420 C 256 300, 384 560, 560 380" fill="none" stroke="#3DD6C6" stroke-width="14" stroke-linecap="round" opacity="0.55"/>
+  <path d="M 176 500 C 320 620, 463.99999999999994 360, 640 520" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" opacity="0.22"/>
+  <rect x="64" y="120" width="144" height="6" rx="3" fill="#3DD6C6" opacity="0.9"/>
+</svg>
