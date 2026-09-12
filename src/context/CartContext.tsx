@@ -233,7 +233,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       options?: { open?: boolean; customPriceInr?: number },
     ) => {
       setItems((prev) => {
-        let next = [...prev];
+        const next = [...prev];
         const isVideo = main.productType === "VIDEO";
         const mainType = isVideo ? ("video" as const) : ("product" as const);
         const mainLineId = isVideo ? `video-${main.id}` : `product-${main.id}`;
