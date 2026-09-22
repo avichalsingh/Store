@@ -20,6 +20,25 @@ export function ProductBrowsePage({ type }: { type: ProductType }) {
     );
   }
 
+  if (catalog.error) {
+    return (
+      <div className="mx-auto max-w-7xl px-4 pb-20 pt-28 sm:px-6 lg:px-8">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-accent">
+          Shop
+        </p>
+        <h1 className="font-display text-4xl font-bold tracking-tight sm:text-5xl">
+          {config.plural}
+        </h1>
+        <div className="mt-12 rounded-3xl border border-dashed border-border p-10 text-center">
+          <p className="font-display text-xl font-bold">Catalog unavailable</p>
+          <p className="mt-2 text-sm text-muted">
+            We couldn&apos;t load products right now. Please try again shortly.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-7xl px-4 pb-20 pt-28 sm:px-6 lg:px-8">
       <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-accent">
@@ -36,7 +55,7 @@ export function ProductBrowsePage({ type }: { type: ProductType }) {
             No {config.plural.toLowerCase()} yet
           </p>
           <p className="mt-2 text-sm text-muted">
-            Publish products of this type in Admin CMS to list them here.
+            No products of this type are available yet.
           </p>
         </div>
       ) : (

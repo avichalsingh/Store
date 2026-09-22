@@ -846,3 +846,88 @@ export function buildStorefrontCatalog(
 export function buildStaticCatalog(): StorefrontCatalog {
   return buildStorefrontCatalog([], [], [], []);
 }
+
+/**
+ * Assemble a storefront catalog from already-mapped public CatalogProducts
+ * (e.g. Supabase catalog_products). Does NOT merge CMS or static seed products.
+ * Collections/characters still come from CMS/static for this phase.
+ */
+export function assembleStorefrontCatalogFromProducts(
+  catalogProducts: CatalogProduct[],
+  collections: AdminCollection[],
+  characters: AdminCharacter[],
+  imagePdpSettings: ImagePdpGlobalSettings = defaultImagePdpGlobalSettings(),
+): StorefrontCatalog {
+  const allProducts = catalogProducts;
+  const productsBySlug = new Map(allProducts.map((p) => [p.slug, p]));
+  const videos = allProducts.filter(
+    (p): p is VideoProduct => p.productType === "VIDEO",
+  );
+
+  const activeCollections = collections.filter((c) => c.status === "active");
+  // Collection membership visuals need AdminProduct[]; empty list keeps covers
+  // from collection.coverImage / coverCustomUrl without pulling CMS products.
+  const cmsCollections = activeCollections.map((c) =>
+    adminCollectionToStorefront(c, [], []),
+  );
+  const managedColIds = new Set(collections.map((c) => c.id));
+  const managedColSlugs = new Set(collections.map((c) => c.slug));
+  const collectionExtras = staticCollections.filter(
+    (c) => !managedColIds.has(c.id) && !managedColSlugs.has(c.slug),
+  );
+  const storeCollections = [...cmsCollections, ...collectionExtras];
+
+  const visibleCharacters = characters.filter(
+    (c) => c.status === "active" || c.status === "hidden",
+  );
+  const cmsCharacters = visibleCharacters
+    .filter((c) => c.showOnCharactersPage !== false && c.status === "active")
+    .map(adminCharacterToStorefront);
+  const managedCharIds = new Set(characters.map((c) => c.id));
+  const managedCharSlugs = new Set(characters.map((c) => c.slug));
+  const characterExtras = staticCharacters.filter(
+    (c) => !managedCharIds.has(c.id) && !managedCharSlugs.has(c.slug),
+  );
+  const storeCharacters = [...cmsCharacters, ...characterExtras].map((c) => ({
+    ...c,
+    videoCount: videos.filter((v) => v.characterId === c.id).length,
+    collectionCount: storeCollections.filter((col) => col.characterId === c.id)
+      .length,
+  }));
+
+  return {
+    videos,
+    products: allProducts,
+    collections: storeCollections,
+    characters: storeCharacters,
+    imagePdpSettings,
+    getVideoBySlug: (slug) => videos.find((v) => v.slug === slug),
+    getVideoById: (id) => videos.find((v) => v.id === id),
+    getVideosByCharacter: (characterId) =>
+      videos.filter((v) => v.characterId === characterId),
+    getTrendingVideos: (limit = 10) =>
+      videos.filter((v) => v.isTrending).slice(0, limit),
+    getRelatedVideos: (video, limit = 4) =>
+      videos
+        .filter(
+          (v) =>
+            v.id !== video.id &&
+            (v.characterId === video.characterId ||
+              v.category === video.category),
+        )
+        .slice(0, limit),
+    getProductBySlug: (slug) => productsBySlug.get(slug),
+    getProductById: (id) => allProducts.find((p) => p.id === id),
+    getProductsByType: (type) =>
+      allProducts.filter((p) => p.productType === type),
+    getCollectionBySlug: (slug) =>
+      storeCollections.find((c) => c.slug === slug),
+    getCollectionById: (id) => storeCollections.find((c) => c.id === id),
+    getFeaturedCollection: () =>
+      storeCollections.find((c) => c.featured) ?? storeCollections[0],
+    getCollectionsByCharacter: (characterId) =>
+      storeCollections.filter((c) => c.characterId === characterId),
+    getCharacterBySlug: (slug) => storeCharacters.find((c) => c.slug === slug),
+    getCharacterById: (id) => storeCharacters.find((c) => c.id === id),
+  };
+}
