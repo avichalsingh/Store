@@ -22,6 +22,7 @@ import { AdminPageHeader } from "@/admin/components/ui/AdminPageHeader";
 import { AdminSaveBar } from "@/admin/components/ui/AdminSaveBar";
 import { discountPct, slugify, uid } from "@/admin/lib/format";
 import { normalizeAdminProduct } from "@/admin/lib/normalizeProduct";
+import { publishProductToCatalog } from "@/admin/lib/publishToCatalog";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import type { AdminProduct } from "@/admin/types";
 import {
@@ -114,13 +115,20 @@ export function ProductEditor({
   productType?: ProductType;
 }) {
   const router = useRouter();
-  const { products, characters, collections, upsertProduct, hydrated } =
-    useAdmin();
+  const {
+    products,
+    characters,
+    collections,
+    upsertProduct,
+    hydrated,
+    pushToast,
+  } = useAdmin();
   const existing = productId
     ? products.find((p) => p.id === productId)
     : undefined;
   const [draft, setDraft] = useState<AdminProduct | null>(null);
   const [baseline, setBaseline] = useState<string>("");
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -172,7 +180,8 @@ export function ProductEditor({
     setDraft((d) => (d ? { ...d, [key]: value } : d));
   };
 
-  const save = (status?: AdminProduct["status"]) => {
+  const save = async (status?: AdminProduct["status"]) => {
+    if (!draft || publishing) return;
     const next = {
       ...draft,
       status: status ?? draft.status,
@@ -181,13 +190,30 @@ export function ProductEditor({
         characters.find((c) => c.id === draft.characterId)?.name ??
         draft.characterName,
     };
-    upsertProduct(
-      next,
-      status === "active" ? "Product published" : "Product saved",
-    );
-    setDraft(next);
-    setBaseline(JSON.stringify(next));
-    if (!productId) router.replace(`/admin/products/${next.id}/edit`);
+
+    // Draft / archive: local CMS only — must not appear via catalog_products.
+    if (next.status !== "active") {
+      upsertProduct(next, "Product saved");
+      setDraft(next);
+      setBaseline(JSON.stringify(next));
+      if (!productId) router.replace(`/admin/products/${next.id}/edit`);
+      return;
+    }
+
+    setPublishing(true);
+    try {
+      const result = await publishProductToCatalog(next);
+      if (!result.ok) {
+        pushToast(result.error, "error");
+        return;
+      }
+      upsertProduct(next, "Product published");
+      setDraft(next);
+      setBaseline(JSON.stringify(next));
+      if (!productId) router.replace(`/admin/products/${next.id}/edit`);
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const inrPct = discountPct(
@@ -207,11 +233,19 @@ export function ProductEditor({
         actions={
           <>
             <AdminBadge tone="accent">{typeConfig.label}</AdminBadge>
-            <AdminButton variant="secondary" onClick={() => save("draft")}>
+            <AdminButton
+              variant="secondary"
+              onClick={() => void save("draft")}
+              disabled={publishing}
+            >
               Save draft
             </AdminButton>
-            <AdminButton variant="primary" onClick={() => save("active")}>
-              Publish
+            <AdminButton
+              variant="primary"
+              onClick={() => void save("active")}
+              disabled={publishing}
+            >
+              {publishing ? "Publishing…" : "Publish"}
             </AdminButton>
           </>
         }
@@ -1548,7 +1582,7 @@ export function ProductEditor({
 
       <AdminSaveBar
         dirty={dirty}
-        onSave={() => save()}
+        onSave={() => void save()}
         onDiscard={() => {
           const restored = JSON.parse(baseline) as AdminProduct;
           setDraft(restored);

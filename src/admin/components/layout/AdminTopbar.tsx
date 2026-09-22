@@ -1,6 +1,7 @@
 "use client";
 
-import { getAdminSession, clearAdminSession } from "@/admin/lib/auth";
+import { getAdminSession } from "@/admin/lib/auth";
+import { signOutAdmin } from "@/admin/lib/signOutAdmin";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import { Bell, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -107,8 +108,9 @@ export function AdminTopbar({
         className="flex items-center gap-2 rounded-xl border border-[var(--admin-border)] bg-[var(--admin-surface)] px-2 py-1.5"
         onClick={() => {
           if (confirm("Sign out of RHYTHM Admin?")) {
-            clearAdminSession();
-            router.replace("/admin/login");
+            void signOutAdmin().then(() => {
+              router.replace("/admin/login");
+            });
           }
         }}
         title="Sign out"

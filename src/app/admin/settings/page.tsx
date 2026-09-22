@@ -11,7 +11,7 @@ import {
 } from "@/admin/components/ui/AdminField";
 import { AdminPageHeader } from "@/admin/components/ui/AdminPageHeader";
 import { AdminTabs } from "@/admin/components/ui/AdminTabs";
-import { clearAdminSession } from "@/admin/lib/auth";
+import { signOutAdmin } from "@/admin/lib/signOutAdmin";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import type {
   GlobalMediaSettings,
@@ -110,8 +110,9 @@ export default function SettingsPage() {
           <AdminButton
             variant="secondary"
             onClick={() => {
-              clearAdminSession();
-              router.replace("/admin/login");
+              void signOutAdmin().then(() => {
+                router.replace("/admin/login");
+              });
             }}
           >
             Sign out

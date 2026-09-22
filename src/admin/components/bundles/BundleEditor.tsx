@@ -35,6 +35,7 @@ import {
   uid,
 } from "@/admin/lib/format";
 import { normalizeAdminProduct } from "@/admin/lib/normalizeProduct";
+import { publishProductToCatalog } from "@/admin/lib/publishToCatalog";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import type { AdminProduct } from "@/admin/types";
 import type { BundleData } from "@/catalog/productPayloads";
@@ -84,7 +85,8 @@ export function BundleEditor({
   isNew?: boolean;
 }) {
   const router = useRouter();
-  const { products, upsertProduct, hydrated, mediaAssets } = useAdmin();
+  const { products, upsertProduct, hydrated, mediaAssets, pushToast } =
+    useAdmin();
 
   const existing = useMemo(() => {
     if (isNew || !productId) return undefined;
@@ -100,6 +102,7 @@ export function BundleEditor({
   const [slugTouched, setSlugTouched] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -192,7 +195,8 @@ export function BundleEditor({
     });
   };
 
-  const save = (status?: AdminProduct["status"]) => {
+  const save = async (status?: AdminProduct["status"]) => {
+    if (!draft || publishing) return;
     const withCover = applyBundleCoverToProduct(draft, products, mediaAssets);
     const next = normalizeAdminProduct({
       ...withCover,
@@ -200,15 +204,34 @@ export function BundleEditor({
       slug: draft.slug || slugify(draft.name) || `bundle-${Date.now()}`,
       updatedAt: new Date().toISOString(),
     });
-    upsertProduct(
-      next,
-      status === "active" ? "Bundle published" : "Bundle saved",
-    );
-    setDraft(next);
-    setBaseline(JSON.stringify(next));
-    setSavedAt(next.updatedAt);
-    if (isNew) {
-      router.replace(`/admin/bundles/${next.id}`);
+
+    if (next.status !== "active") {
+      upsertProduct(next, "Bundle saved");
+      setDraft(next);
+      setBaseline(JSON.stringify(next));
+      setSavedAt(next.updatedAt);
+      if (isNew) {
+        router.replace(`/admin/bundles/${next.id}`);
+      }
+      return;
+    }
+
+    setPublishing(true);
+    try {
+      const result = await publishProductToCatalog(next);
+      if (!result.ok) {
+        pushToast(result.error, "error");
+        return;
+      }
+      upsertProduct(next, "Bundle published");
+      setDraft(next);
+      setBaseline(JSON.stringify(next));
+      setSavedAt(next.updatedAt);
+      if (isNew) {
+        router.replace(`/admin/bundles/${next.id}`);
+      }
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -264,11 +287,19 @@ export function BundleEditor({
                 All changes saved
               </span>
             ) : null}
-            <AdminButton variant="secondary" onClick={() => save("draft")}>
+            <AdminButton
+              variant="secondary"
+              onClick={() => void save("draft")}
+              disabled={publishing}
+            >
               Save Draft
             </AdminButton>
-            <AdminButton variant="primary" onClick={() => save("active")}>
-              Save Changes
+            <AdminButton
+              variant="primary"
+              onClick={() => void save("active")}
+              disabled={publishing}
+            >
+              {publishing ? "Publishing…" : "Publish"}
             </AdminButton>
           </div>
         }

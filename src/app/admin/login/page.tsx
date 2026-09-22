@@ -12,19 +12,52 @@ export default function AdminLoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
-      setError("Enter any email and password to continue.");
+      setError("Enter email and admin password to continue.");
       return;
     }
-    setAdminSession({
-      email: email.trim(),
-      name: email.trim().split("@")[0] || "Admin",
-      loggedInAt: new Date().toISOString(),
-    });
-    router.replace("/admin");
+
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ password }),
+      });
+
+      let body: { error?: string } = {};
+      try {
+        body = (await res.json()) as { error?: string };
+      } catch {
+        body = {};
+      }
+
+      if (!res.ok) {
+        setError(
+          typeof body.error === "string"
+            ? body.error
+            : "Sign-in failed. Check the admin password.",
+        );
+        return;
+      }
+
+      setAdminSession({
+        email: email.trim(),
+        name: email.trim().split("@")[0] || "Admin",
+        loggedInAt: new Date().toISOString(),
+      });
+      router.replace("/admin");
+    } catch {
+      setError("Could not reach the admin session API.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -37,7 +70,7 @@ export default function AdminLoginPage() {
         }}
       />
       <form
-        onSubmit={onSubmit}
+        onSubmit={(e) => void onSubmit(e)}
         className="relative w-full max-w-md rounded-3xl border border-[var(--admin-border)] bg-[var(--admin-surface)] p-8 shadow-[var(--admin-shadow-lg)]"
       >
         <div className="mb-6 flex items-center gap-3">
@@ -68,16 +101,23 @@ export default function AdminLoginPage() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Any password for demo"
+              placeholder="Admin API password"
             />
           </AdminField>
           {error ? <p className="text-sm text-[var(--admin-danger)]">{error}</p> : null}
-          <AdminButton type="submit" variant="primary" className="w-full" size="lg">
-            Sign in
+          <AdminButton
+            type="submit"
+            variant="primary"
+            className="w-full"
+            size="lg"
+            disabled={submitting}
+          >
+            {submitting ? "Signing in…" : "Sign in"}
           </AdminButton>
         </div>
         <p className="mt-5 text-center text-xs text-[var(--admin-muted)]">
-          Demo auth — any non-empty credentials work.
+          Use the server admin password. An httpOnly session cookie is required
+          to publish products to the storefront catalog.
         </p>
       </form>
     </div>
