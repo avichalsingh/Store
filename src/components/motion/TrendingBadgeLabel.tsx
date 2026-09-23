@@ -8,13 +8,14 @@ export function TrendingBadgeLabel({
   className,
   textClassName,
 }: {
-  badge: string;
+  badge: string | null | undefined;
   className?: string;
   textClassName?: string;
 }) {
-  const match = badge.match(/^(\p{Extended_Pictographic}\uFE0F?)\s*(.*)$/u);
+  const safeBadge = typeof badge === "string" ? badge : "";
+  const match = safeBadge.match(/^(\p{Extended_Pictographic}\uFE0F?)\s*(.*)$/u);
   const emoji = match?.[1] ?? null;
-  const text = match?.[2] ?? badge;
+  const text = match?.[2] ?? safeBadge;
 
   return (
     <span className={cn("inline-flex items-center gap-1.5", className)}>
@@ -23,7 +24,7 @@ export function TrendingBadgeLabel({
           {emoji}
         </span>
       )}
-      <span className={textClassName}>{text || badge}</span>
+      <span className={textClassName}>{text || safeBadge}</span>
     </span>
   );
 }
