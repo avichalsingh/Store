@@ -85,7 +85,7 @@ export function BundleEditor({
   isNew?: boolean;
 }) {
   const router = useRouter();
-  const { products, upsertProduct, hydrated, mediaAssets, pushToast } =
+  const { products, characters, upsertProduct, hydrated, mediaAssets, pushToast } =
     useAdmin();
 
   const existing = useMemo(() => {
@@ -218,7 +218,11 @@ export function BundleEditor({
 
     setPublishing(true);
     try {
-      const result = await publishProductToCatalog(next);
+      const result = await publishProductToCatalog(next, {
+        characters,
+        products,
+        mediaAssets,
+      });
       if (!result.ok) {
         pushToast(result.error, "error");
         return;

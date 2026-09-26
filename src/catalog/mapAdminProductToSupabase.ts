@@ -119,7 +119,9 @@ export function adminProductToProductsRow(
     slug: product.slug.trim(),
     product_type: product.productType,
     character_id: characterId,
-    character_name: product.characterName?.trim() || null,
+    character_name: characterId
+      ? product.characterName?.trim() || null
+      : null,
     category: product.category ?? "",
     collection_ids: Array.isArray(product.collectionIds)
       ? product.collectionIds

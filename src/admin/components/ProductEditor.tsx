@@ -45,8 +45,8 @@ function blankProduct(type: ProductType = "VIDEO"): AdminProduct {
     name: "",
     slug: "",
     productType: type,
-    characterId: type === "VIDEO" ? "char-milo" : undefined,
-    characterName: type === "VIDEO" ? "Milo" : undefined,
+    characterId: undefined,
+    characterName: undefined,
     category:
       type === "VIDEO"
         ? "Hip Hop"
@@ -119,6 +119,7 @@ export function ProductEditor({
     products,
     characters,
     collections,
+    mediaAssets,
     upsertProduct,
     hydrated,
     pushToast,
@@ -136,10 +137,6 @@ export function ProductEditor({
     const initial = existing
       ? structuredClone(existing)
       : blankProduct(productType ?? "VIDEO");
-    if (!productId && initial.productType === "VIDEO" && characters[0]) {
-      initial.characterId = characters[0].id;
-      initial.characterName = characters[0].name;
-    }
     setDraft(initial);
     setBaseline(JSON.stringify(initial));
     // Only re-init when switching products / hydration — not on every store sync
@@ -182,13 +179,16 @@ export function ProductEditor({
 
   const save = async (status?: AdminProduct["status"]) => {
     if (!draft || publishing) return;
+    const selectedCharacterId = draft.characterId?.trim() || undefined;
     const next = {
       ...draft,
       status: status ?? draft.status,
       updatedAt: new Date().toISOString(),
-      characterName:
-        characters.find((c) => c.id === draft.characterId)?.name ??
-        draft.characterName,
+      characterId: selectedCharacterId,
+      characterName: selectedCharacterId
+        ? (characters.find((c) => c.id === selectedCharacterId)?.name ??
+          draft.characterName)
+        : undefined,
     };
 
     // Draft / archive: local CMS only — must not appear via catalog_products.
@@ -202,7 +202,11 @@ export function ProductEditor({
 
     setPublishing(true);
     try {
-      const result = await publishProductToCatalog(next);
+      const result = await publishProductToCatalog(next, {
+        characters,
+        products,
+        mediaAssets,
+      });
       if (!result.ok) {
         pushToast(result.error, "error");
         return;
@@ -288,7 +292,19 @@ export function ProductEditor({
                 <AdminSelect
                   value={draft.characterId ?? ""}
                   onChange={(e) => {
-                    const id = e.target.value;
+                    const id = e.target.value.trim();
+                    if (!id) {
+                      setDraft((d) =>
+                        d
+                          ? {
+                              ...d,
+                              characterId: undefined,
+                              characterName: undefined,
+                            }
+                          : d,
+                      );
+                      return;
+                    }
                     const ch = characters.find((c) => c.id === id);
                     setDraft((d) =>
                       d
@@ -301,6 +317,7 @@ export function ProductEditor({
                     );
                   }}
                 >
+                  <option value="">None</option>
                   {characters.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}

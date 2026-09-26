@@ -23,6 +23,7 @@ import {
   recomputeCharacterCounts,
 } from "@/admin/lib/characterHelpers";
 import { formatDateTime, formatInr, slugify, uid } from "@/admin/lib/format";
+import { publishCharacterToCatalog } from "@/admin/lib/publishToCatalog";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import type { AdminCharacter } from "@/admin/types";
 import {
@@ -32,6 +33,7 @@ import {
   ExternalLink,
   MoreHorizontal,
   Trash2,
+  Upload,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -78,6 +80,7 @@ export function CharacterEditor({
     assignProductsToCharacter,
     removeProductFromCharacter,
     hydrated,
+    pushToast,
   } = useAdmin();
 
   const existing = useMemo(() => {
@@ -94,6 +97,7 @@ export function CharacterEditor({
   const [moreOpen, setMoreOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -191,6 +195,29 @@ export function CharacterEditor({
     }
   };
 
+  const publish = async () => {
+    if (!draft || publishing) return;
+    const saved = prepareSave();
+    upsertCharacter(saved);
+    setDraft(saved);
+    setBaseline(JSON.stringify(saved));
+    setSavedAt(saved.updatedAt);
+    if (isNew) {
+      router.replace(`/admin/characters/${saved.id}`);
+    }
+    setPublishing(true);
+    try {
+      const result = await publishCharacterToCatalog(saved);
+      if (!result.ok) {
+        pushToast(result.error, "error");
+        return;
+      }
+      pushToast("Character published to catalog");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   const portraitSrc = draft.image;
   const portraitBlob =
     !!portraitSrc &&
@@ -241,6 +268,14 @@ export function CharacterEditor({
             </AdminButton>
             <AdminButton variant="primary" onClick={save}>
               Save Changes
+            </AdminButton>
+            <AdminButton
+              variant="secondary"
+              disabled={publishing || !draft.name.trim()}
+              onClick={() => void publish()}
+            >
+              <Upload className="h-4 w-4" />
+              {publishing ? "Publishing…" : "Publish character"}
             </AdminButton>
             {!isNew && existing ? (
               <div className="relative" ref={moreRef}>
