@@ -321,9 +321,30 @@ export async function encodeCustomerPreview(options: {
     if (e.data && e.data.size > 0) chunks.push(e.data);
   };
 
+  /** Safari can hang forever after stop() if onstop never fires. */
+  const RECORDER_STOP_TIMEOUT_MS = 12_000;
   const stopped = new Promise<void>((resolve, reject) => {
-    recorder.onstop = () => resolve();
-    recorder.onerror = () => reject(new Error("MediaRecorder failed"));
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      recorder.onstop = null;
+      recorder.onerror = null;
+      fn();
+    };
+    const timer = window.setTimeout(() => {
+      finish(() =>
+        reject(
+          new Error(
+            "Preview recording timed out — browser did not finish MediaRecorder.stop()",
+          ),
+        ),
+      );
+    }, RECORDER_STOP_TIMEOUT_MS);
+    recorder.onstop = () => finish(() => resolve());
+    recorder.onerror = () =>
+      finish(() => reject(new Error("MediaRecorder failed")));
   });
 
   // Draw loop while video plays
@@ -347,6 +368,34 @@ export async function encodeCustomerPreview(options: {
       );
     }
     raf = requestAnimationFrame(draw);
+  };
+
+  const teardownRecorderResources = () => {
+    drawing = false;
+    cancelAnimationFrame(raf);
+    try {
+      video.pause();
+    } catch {
+      /* ignore */
+    }
+    try {
+      video.removeAttribute("src");
+      video.load();
+    } catch {
+      /* ignore */
+    }
+    for (const t of stream.getTracks()) {
+      try {
+        t.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      if (recorder.state !== "inactive") recorder.stop();
+    } catch {
+      /* ignore */
+    }
   };
 
   recorder.start(250);
@@ -386,8 +435,13 @@ export async function encodeCustomerPreview(options: {
     /* ignore */
   }
 
-  if (recorder.state !== "inactive") recorder.stop();
-  await stopped;
+  try {
+    if (recorder.state !== "inactive") recorder.stop();
+    await stopped;
+  } catch (err) {
+    teardownRecorderResources();
+    throw err;
+  }
 
   video.pause();
   video.removeAttribute("src");

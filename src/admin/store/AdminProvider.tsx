@@ -158,6 +158,9 @@ type AdminContextValue = AdminCmsState & {
 const AdminContext = createContext<AdminContextValue | null>(null);
 
 /** Probe real duration / dimensions from an uploaded video File. */
+/** Safari can hang forever on blob: loadedmetadata — never wait unbounded. */
+const PROBE_VIDEO_TIMEOUT_MS = 12_000;
+
 function probeVideoFile(
   file: File,
 ): Promise<{ durationSeconds: number; width: number; height: number }> {
@@ -167,25 +170,48 @@ function probeVideoFile(
     video.preload = "metadata";
     video.muted = true;
     video.playsInline = true;
+    let settled = false;
+
     const cleanup = () => {
+      window.clearTimeout(timer);
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      try {
+        video.removeAttribute("src");
+        video.load();
+      } catch {
+        /* ignore */
+      }
       try {
         URL.revokeObjectURL(url);
       } catch {
         /* ignore */
       }
     };
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn();
+    };
+
+    const timer = window.setTimeout(() => {
+      finish(() =>
+        reject(new Error("Timed out reading video metadata")),
+      );
+    }, PROBE_VIDEO_TIMEOUT_MS);
+
     video.onloadedmetadata = () => {
       const durationSeconds = Number.isFinite(video.duration)
         ? video.duration
         : 0;
       const width = video.videoWidth || 0;
       const height = video.videoHeight || 0;
-      cleanup();
-      resolve({ durationSeconds, width, height });
+      finish(() => resolve({ durationSeconds, width, height }));
     };
     video.onerror = () => {
-      cleanup();
-      reject(new Error("Could not read video metadata"));
+      finish(() => reject(new Error("Could not read video metadata")));
     };
     video.src = url;
   });

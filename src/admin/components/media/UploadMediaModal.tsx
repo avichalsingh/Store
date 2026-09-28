@@ -53,11 +53,20 @@ export function UploadMediaModal({
   const inputRef = useRef<HTMLInputElement>(null);
   const progressTimers = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const cancelledKeys = useRef<Set<string>>(new Set());
+  const autoCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearAutoCloseTimer = useCallback(() => {
+    if (autoCloseTimer.current) {
+      clearTimeout(autoCloseTimer.current);
+      autoCloseTimer.current = null;
+    }
+  }, []);
 
   const clearTimers = useCallback(() => {
     progressTimers.current.forEach((t) => clearInterval(t));
     progressTimers.current.clear();
-  }, []);
+    clearAutoCloseTimer();
+  }, [clearAutoCloseTimer]);
 
   useEffect(() => {
     if (!open) {
@@ -79,9 +88,19 @@ export function UploadMediaModal({
         const asset = mediaAssets.find((a) => a.id === item.assetId);
         if (!asset) return item;
         if (asset.processingStatus === "ready") {
+          const t = progressTimers.current.get(item.key);
+          if (t) {
+            clearInterval(t);
+            progressTimers.current.delete(item.key);
+          }
           return { ...item, phase: "done", progress: 100 };
         }
         if (asset.processingStatus === "failed") {
+          const t = progressTimers.current.get(item.key);
+          if (t) {
+            clearInterval(t);
+            progressTimers.current.delete(item.key);
+          }
           return { ...item, phase: "failed", progress: item.progress };
         }
         if (
@@ -98,6 +117,24 @@ export function UploadMediaModal({
       }),
     );
   }, [mediaAssets]);
+
+  /** Auto-close only when every queued upload successfully reached Ready. */
+  useEffect(() => {
+    clearAutoCloseTimer();
+    if (!open || queue.length === 0) return;
+
+    const anyIncompleteOrFailed = queue.some(
+      (item) => item.phase !== "done",
+    );
+    if (anyIncompleteOrFailed) return;
+
+    autoCloseTimer.current = setTimeout(() => {
+      autoCloseTimer.current = null;
+      onClose();
+    }, 750);
+
+    return () => clearAutoCloseTimer();
+  }, [open, queue, onClose, clearAutoCloseTimer]);
 
   const enqueueFiles = async (files: FileList | File[]) => {
     const list = Array.from(files).filter(isImageMode ? isImageFile : isVideoFile);
