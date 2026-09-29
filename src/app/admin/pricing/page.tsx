@@ -26,7 +26,6 @@ export default function PricingPage() {
     deleteOffer,
     imagePdpSettings,
     setImagePdpSettings,
-    hydrated,
   } = useAdmin();
   const [section, setSection] = useState<"offers" | "image-pdp">("offers");
   const [tab, setTab] = useState<OfferStatus | "all">("active");
@@ -39,7 +38,6 @@ export default function PricingPage() {
     return offers.filter((o) => o.status === tab);
   }, [offers, tab]);
 
-  if (!hydrated) return null;
 
   const pdpSettings = imagePdpDraft ?? imagePdpSettings;
 

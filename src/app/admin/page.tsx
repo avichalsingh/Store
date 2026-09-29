@@ -24,7 +24,7 @@ import { getAdminSession } from "@/admin/lib/auth";
 type Range = "7D" | "30D" | "90D" | "12M";
 
 export default function AdminDashboardPage() {
-  const { products, orders, analytics, hydrated } = useAdmin();
+  const { products, orders, analytics } = useAdmin();
   const [range, setRange] = useState<Range>("30D");
   const [adminName, setAdminName] = useState("Admin");
   const snap = analytics[range];
@@ -48,9 +48,8 @@ export default function AdminDashboardPage() {
     [orders],
   );
 
-  if (!hydrated) {
-    return <p className="text-sm text-[var(--admin-muted)]">Loading dashboard…</p>;
-  }
+  // Render immediately from current AdminProvider state (seed, then localStorage).
+  // Do not blank the main pane while waiting for post-mount loadState().
 
   return (
     <div>

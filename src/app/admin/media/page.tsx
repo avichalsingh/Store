@@ -92,7 +92,6 @@ export default function MediaLibraryPage() {
     detachMediaFromProduct,
     deleteMediaAsset,
     regenerateMediaPreview,
-    hydrated,
   } = useAdmin();
   const searchParams = useSearchParams();
   const [q, setQ] = useState("");
@@ -196,7 +195,8 @@ export default function MediaLibraryPage() {
     setAttachAssetId(null);
   };
 
-  if (!hydrated) return null;
+  // Render immediately from current CMS state; loadState() updates after mount.
+  // IndexedDB blobs still restore on demand in MediaLibraryCardVisual.
 
   const assetTypeFilters: Array<{ id: AssetTypeFilter; label: string }> = [
     { id: "all", label: "All" },

@@ -18,6 +18,13 @@ type Timer = ReturnType<typeof setTimeout>;
 /** Hard ceiling so a hung encode cannot leave the asset in PROCESSING forever. */
 const JOB_TIMEOUT_MS = 90_000;
 
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
+}
+
 /**
  * Starts real preview encode promptly.
  * Progress UI comes from the encoder; this helper must never mark preview
@@ -25,17 +32,21 @@ const JOB_TIMEOUT_MS = 90_000;
  *
  * Terminal outcomes: encode callback sets READY/FAILED via materialize, or
  * this helper marks FAILED on encode rejection / overall timeout.
- * Cancel only suppresses updates when a newer job has taken over.
+ * Cancel and job timeout abort the encode signal so RAF/MediaRecorder tear down.
  */
 export function simulateProcessing(
   asset: MediaAsset,
   onUpdate: (partial: Partial<MediaAsset>) => void,
-  onEncode?: (assetSnapshot: MediaAsset) => void | Promise<void>,
+  onEncode?: (
+    assetSnapshot: MediaAsset,
+    signal: AbortSignal,
+  ) => void | Promise<void>,
 ): () => void {
   const timers: Timer[] = [];
   let cancelled = false;
   let latest: MediaAsset = asset;
   let jobTimer: Timer | null = null;
+  const abortController = new AbortController();
 
   const schedule = (ms: number, fn: () => void) => {
     const id = setTimeout(() => {
@@ -109,6 +120,8 @@ export function simulateProcessing(
     });
 
     jobTimer = setTimeout(() => {
+      // Stop canvas/RAF/MediaRecorder for real — do not leave encode running.
+      abortController.abort();
       fail(
         "Preview generation timed out. Retry preview generation — the master image was not modified.",
       );
@@ -116,7 +129,7 @@ export function simulateProcessing(
     timers.push(jobTimer);
 
     void Promise.resolve()
-      .then(() => onEncode?.(latest))
+      .then(() => onEncode?.(latest, abortController.signal))
       .then(() => {
         if (jobTimer) {
           clearTimeout(jobTimer);
@@ -129,12 +142,16 @@ export function simulateProcessing(
           clearTimeout(jobTimer);
           jobTimer = null;
         }
+        if (cancelled) return;
+        // Timeout already called fail() after abort; cancel path is cancelled.
+        if (isAbortError(err) || abortController.signal.aborted) return;
         fail(err instanceof Error ? err.message : "Preview encode failed");
       });
   });
 
   return () => {
     cancelled = true;
+    abortController.abort();
     timers.forEach(clearTimeout);
     jobTimer = null;
   };

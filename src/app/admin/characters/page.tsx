@@ -16,9 +16,8 @@ import { useRouter } from "next/navigation";
 
 export default function CharactersPage() {
   const router = useRouter();
-  const { characters, products, collections, hydrated } = useAdmin();
+  const { characters, products, collections } = useAdmin();
 
-  if (!hydrated) return null;
 
   return (
     <div>

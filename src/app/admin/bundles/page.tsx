@@ -18,7 +18,7 @@ import { useMemo, useState } from "react";
  * Bundles are purchasable packages of included products.
  */
 export default function BundlesAdminPage() {
-  const { products, mediaAssets, hydrated } = useAdmin();
+  const { products, mediaAssets } = useAdmin();
   const [q, setQ] = useState("");
 
   const bundles = useMemo(() => {
@@ -35,7 +35,6 @@ export default function BundlesAdminPage() {
     return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }, [products, q]);
 
-  if (!hydrated) return null;
 
   return (
     <div>

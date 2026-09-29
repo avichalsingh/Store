@@ -15,9 +15,9 @@ import { useRouter } from "next/navigation";
 
 export default function CollectionsPage() {
   const router = useRouter();
-  const { collections, products, mediaAssets, hydrated } = useAdmin();
+  const { collections, products, mediaAssets } = useAdmin();
 
-  if (!hydrated) return null;
+  // Render immediately from current CMS state; loadState() updates after mount.
 
   return (
     <div>

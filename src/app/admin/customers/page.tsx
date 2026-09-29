@@ -13,7 +13,7 @@ import { UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 
 export default function CustomersPage() {
-  const { customers, orders, hydrated } = useAdmin();
+  const { customers, orders } = useAdmin();
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<AdminCustomer | null>(null);
 
@@ -62,7 +62,6 @@ export default function CustomersPage() {
     ? orders.filter((o) => o.customerId === selected.id)
     : [];
 
-  if (!hydrated) return null;
 
   return (
     <div>

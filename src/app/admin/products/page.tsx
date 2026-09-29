@@ -28,7 +28,6 @@ export default function ProductsPage() {
     duplicateProduct,
     archiveProduct,
     deleteProduct,
-    hydrated,
   } = useAdmin();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | AdminProductStatus>("all");
@@ -61,7 +60,7 @@ export default function ProductsPage() {
     return list;
   }, [products, q, status, sort, productType]);
 
-  if (!hydrated) return null;
+  // Render immediately from current CMS state; loadState() updates after mount.
 
   const rowSubtitle = (p: (typeof products)[number]) => {
     const typeLabel = getProductTypeConfig(p.productType).label;

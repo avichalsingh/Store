@@ -40,12 +40,10 @@ export default function CampaignsPage() {
     deleteCampaign,
     upsertAnnouncement,
     deleteAnnouncement,
-    hydrated,
   } = useAdmin();
   const [editing, setEditing] = useState<AdminCampaign | null>(null);
   const [annDraft, setAnnDraft] = useState("");
 
-  if (!hydrated) return null;
 
   return (
     <div>

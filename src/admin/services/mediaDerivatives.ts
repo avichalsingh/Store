@@ -27,6 +27,8 @@ export type MaterializeOptions = {
   /** Skip thumbnail extraction (e.g. regenerate preview only) */
   skipThumbnail?: boolean;
   onProgress?: (pct: number) => void;
+  /** Abort in-flight canvas/MediaRecorder encode (real teardown). */
+  signal?: AbortSignal;
 };
 
 /** True when this asset should use the still-image preview pipeline. */
@@ -171,6 +173,7 @@ export async function materializePreviewAndThumbnail(
           quality,
           watermark,
           onProgress: options?.onProgress,
+          signal: options?.signal,
         });
 
     const ext = isImage ? "jpg" : "webm";

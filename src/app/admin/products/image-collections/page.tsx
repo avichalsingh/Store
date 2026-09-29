@@ -56,14 +56,13 @@ function deriveImageCollections(products: AdminProduct[]): ImageCollectionRow[] 
 }
 
 export default function ImageCollectionsPage() {
-  const { products, hydrated } = useAdmin();
+  const { products } = useAdmin();
 
   const collections = useMemo(
     () => deriveImageCollections(products),
     [products],
   );
 
-  if (!hydrated) return null;
 
   return (
     <div>

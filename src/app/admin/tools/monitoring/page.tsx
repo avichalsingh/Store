@@ -47,7 +47,6 @@ export default function ToolsMonitoringPage() {
     toolPendingChanges,
     toolPriceHistory,
     resolveToolPendingChange,
-    hydrated,
   } = useAdmin();
 
   const monitored = useMemo(
@@ -63,7 +62,6 @@ export default function ToolsMonitoringPage() {
   const toolName = (id: string) =>
     aiTools.find((t) => t.id === id)?.name ?? id;
 
-  if (!hydrated) return null;
 
   const needsReview = monitored.filter((t) =>
     ["needs_review", "change_detected", "sale_detected", "check_failed"].includes(

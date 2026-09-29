@@ -31,7 +31,7 @@ import { useMemo, useState } from "react";
 type BoolFilter = "all" | "yes" | "no";
 
 export default function ToolsListPage() {
-  const { aiTools, deleteAiTool, hydrated } = useAdmin();
+  const { aiTools, deleteAiTool } = useAdmin();
   const [q, setQ] = useState("");
   const [category, setCategory] = useState<"all" | ToolCategoryId>("all");
   const [status, setStatus] = useState<"all" | ToolStatus>("all");
@@ -70,7 +70,6 @@ export default function ToolsListPage() {
     return list;
   }, [aiTools, q, category, status, featured, monitored, sale]);
 
-  if (!hydrated) return null;
 
   return (
     <div>

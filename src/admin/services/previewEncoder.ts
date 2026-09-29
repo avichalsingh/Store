@@ -235,7 +235,20 @@ function waitForEvent(
 }
 
 /**
+ * CMS customer-preview encodes at most this many seconds of the master.
+ * Full-duration canvas/MediaRecorder encode freezes Safari/WebKit.
+ */
+export const CUSTOMER_PREVIEW_MAX_SECONDS = 8;
+
+function abortError(message = "Preview encode aborted"): DOMException {
+  return new DOMException(message, "AbortError");
+}
+
+/**
  * Encode a customer preview from a master video Object URL / blob URL.
+ * Encodes at most {@link CUSTOMER_PREVIEW_MAX_SECONDS} of the master (or the
+ * full master when shorter). Pass `signal` so cancel/timeout can tear down
+ * RAF / video / MediaRecorder instead of leaving work running.
  */
 export async function encodeCustomerPreview(options: {
   masterUrl: string;
@@ -243,10 +256,17 @@ export async function encodeCustomerPreview(options: {
   watermark: WatermarkConfig;
   watermarkLabel?: string;
   onProgress?: (pct: number) => void;
+  signal?: AbortSignal;
 }): Promise<PreviewEncodeResult> {
   const profile = PREVIEW_ENCODE_PROFILES[options.quality];
   const mimeType = pickRecorderMime();
   const label = options.watermarkLabel ?? "RHYTHM";
+  const signal = options.signal;
+
+  const throwIfAborted = () => {
+    if (signal?.aborted) throw abortError();
+  };
+  throwIfAborted();
 
   const video = document.createElement("video");
   video.playsInline = true;
@@ -262,13 +282,22 @@ export async function encodeCustomerPreview(options: {
   video.src = options.masterUrl;
 
   await waitForEvent(video, "loadedmetadata", 25000);
+  throwIfAborted();
   if (video.readyState < 2) {
     await waitForEvent(video, "loadeddata").catch(() => undefined);
   }
+  throwIfAborted();
 
   const srcW = video.videoWidth || 1080;
   const srcH = video.videoHeight || 1920;
-  const durationSeconds = Number.isFinite(video.duration) ? video.duration : 0;
+  const masterDurationSeconds = Number.isFinite(video.duration)
+    ? video.duration
+    : 0;
+  /** Preview derivative length — never the full master when longer than the cap. */
+  const encodeDurationSeconds =
+    masterDurationSeconds > 0
+      ? Math.min(masterDurationSeconds, CUSTOMER_PREVIEW_MAX_SECONDS)
+      : CUSTOMER_PREVIEW_MAX_SECONDS;
   const { width, height } = fitContain(
     srcW,
     srcH,
@@ -285,6 +314,7 @@ export async function encodeCustomerPreview(options: {
   const wmImage = options.watermark.enabled && options.watermark.imageUrl
     ? await loadImage(options.watermark.imageUrl)
     : null;
+  throwIfAborted();
 
   // Prefer capturing audio from the element when supported (still muted playback).
   const canvasStream = canvas.captureStream(profile.fps);
@@ -350,6 +380,7 @@ export async function encodeCustomerPreview(options: {
   // Draw loop while video plays
   let raf = 0;
   let drawing = true;
+  let playWaitTimer: ReturnType<typeof setTimeout> | null = null;
   const draw = () => {
     if (!drawing) return;
     ctx.drawImage(video, 0, 0, width, height);
@@ -362,9 +393,12 @@ export async function encodeCustomerPreview(options: {
       label,
       wmImage,
     );
-    if (durationSeconds > 0) {
+    if (encodeDurationSeconds > 0) {
       options.onProgress?.(
-        Math.min(99, Math.round((video.currentTime / durationSeconds) * 100)),
+        Math.min(
+          99,
+          Math.round((video.currentTime / encodeDurationSeconds) * 100),
+        ),
       );
     }
     raf = requestAnimationFrame(draw);
@@ -373,6 +407,10 @@ export async function encodeCustomerPreview(options: {
   const teardownRecorderResources = () => {
     drawing = false;
     cancelAnimationFrame(raf);
+    if (playWaitTimer != null) {
+      window.clearTimeout(playWaitTimer);
+      playWaitTimer = null;
+    }
     try {
       video.pause();
     } catch {
@@ -398,74 +436,140 @@ export async function encodeCustomerPreview(options: {
     }
   };
 
-  recorder.start(250);
-  draw();
+  const onAbort = () => {
+    teardownRecorderResources();
+  };
+  signal?.addEventListener("abort", onAbort);
 
   try {
-    await video.play();
-  } catch {
-    // Autoplay policies — try muted
-    video.muted = true;
-    await video.play();
-  }
+    throwIfAborted();
+    recorder.start(250);
+    draw();
 
-  await new Promise<void>((resolve) => {
-    const onEnded = () => resolve();
-    video.addEventListener("ended", onEnded, { once: true });
-    // Safety timeout: duration + buffer
-    const ms = Math.max(3000, (durationSeconds || 15) * 1000 + 2000);
-    window.setTimeout(() => resolve(), ms);
-  });
+    try {
+      await video.play();
+    } catch {
+      // Autoplay policies — try muted
+      video.muted = true;
+      await video.play();
+    }
+    throwIfAborted();
 
-  drawing = false;
-  cancelAnimationFrame(raf);
-  // Final frame
-  try {
-    ctx.drawImage(video, 0, 0, width, height);
-    drawWatermark(
-      ctx,
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(abortError());
+        return;
+      }
+
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        video.removeEventListener("ended", onEnded);
+        video.removeEventListener("timeupdate", onTimeUpdate);
+        signal?.removeEventListener("abort", onSignalAbort);
+        if (playWaitTimer != null) {
+          window.clearTimeout(playWaitTimer);
+          playWaitTimer = null;
+        }
+        resolve();
+      };
+      const failAbort = () => {
+        if (settled) return;
+        settled = true;
+        video.removeEventListener("ended", onEnded);
+        video.removeEventListener("timeupdate", onTimeUpdate);
+        signal?.removeEventListener("abort", onSignalAbort);
+        if (playWaitTimer != null) {
+          window.clearTimeout(playWaitTimer);
+          playWaitTimer = null;
+        }
+        reject(abortError());
+      };
+      const onEnded = () => finish();
+      const onTimeUpdate = () => {
+        if (video.currentTime >= encodeDurationSeconds - 0.05) {
+          try {
+            video.pause();
+          } catch {
+            /* ignore */
+          }
+          finish();
+        }
+      };
+      const onSignalAbort = () => failAbort();
+
+      video.addEventListener("ended", onEnded);
+      video.addEventListener("timeupdate", onTimeUpdate);
+      signal?.addEventListener("abort", onSignalAbort);
+      // Cap wait to encode window (+ small buffer), never full master duration
+      const ms = Math.max(3000, encodeDurationSeconds * 1000 + 2000);
+      playWaitTimer = setTimeout(finish, ms);
+    });
+
+    throwIfAborted();
+
+    drawing = false;
+    cancelAnimationFrame(raf);
+    // Final frame
+    try {
+      ctx.drawImage(video, 0, 0, width, height);
+      drawWatermark(
+        ctx,
+        width,
+        height,
+        options.watermark,
+        video.currentTime || encodeDurationSeconds,
+        label,
+        wmImage,
+      );
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      if (recorder.state !== "inactive") recorder.stop();
+      await stopped;
+    } catch (err) {
+      teardownRecorderResources();
+      throw err;
+    }
+
+    throwIfAborted();
+
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    for (const t of stream.getTracks()) t.stop();
+
+    const blob = new Blob(chunks, {
+      type: mimeType.split(";")[0] || "video/webm",
+    });
+    if (blob.size < 1000) {
+      throw new Error(
+        "Encoded preview was empty — browser may not support recording",
+      );
+    }
+
+    options.onProgress?.(100);
+
+    return {
+      blob,
+      mimeType: blob.type || "video/webm",
       width,
       height,
-      options.watermark,
-      video.currentTime || durationSeconds,
-      label,
-      wmImage,
-    );
-  } catch {
-    /* ignore */
-  }
-
-  try {
-    if (recorder.state !== "inactive") recorder.stop();
-    await stopped;
+      resolution: `${width}x${height}`,
+      sizeBytes: blob.size,
+      durationSeconds: encodeDurationSeconds,
+      quality: options.quality,
+      watermarkApplied: Boolean(options.watermark.enabled),
+    };
   } catch (err) {
     teardownRecorderResources();
     throw err;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
-
-  video.pause();
-  video.removeAttribute("src");
-  video.load();
-  for (const t of stream.getTracks()) t.stop();
-
-  const blob = new Blob(chunks, { type: mimeType.split(";")[0] || "video/webm" });
-  if (blob.size < 1000) {
-    throw new Error("Encoded preview was empty — browser may not support recording");
-  }
-
-  options.onProgress?.(100);
-
-  return {
-    blob,
-    mimeType: blob.type || "video/webm",
-    width,
-    height,
-    resolution: `${width}x${height}`,
-    sizeBytes: blob.size,
-    durationSeconds,
-    quality: options.quality,
-    watermarkApplied: Boolean(options.watermark.enabled),
-  };
 }
 
 

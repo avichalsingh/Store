@@ -382,7 +382,10 @@ export function recomputeMediaUsage(
 
 /**
  * Rebuild session object URLs from IndexedDB onto media asset metadata.
- * Call after loading CMS state from localStorage.
+ *
+ * Phase 0.5: NOT used on Admin boot — that blocked every route behind restoring
+ * all masters. Prefer restoreObjectUrl() on media surfaces that need bytes.
+ * Kept for optional tooling / future batch restore; do not call from hydrate.
  */
 export async function rehydrateMediaObjectUrls(
   assets: MediaAsset[],

@@ -29,7 +29,6 @@ export default function MediaDetailPage() {
     detachMediaFromProduct,
     detachImageAssetFromAiProduct,
     pushToast,
-    hydrated,
   } = useAdmin();
   const [scrub, setScrub] = useState(0);
   const [frameBusy, setFrameBusy] = useState(false);
@@ -77,7 +76,6 @@ export default function MediaDetailPage() {
     return products.filter((p) => asset.usedByProductIds.includes(p.id));
   }, [asset, products]);
 
-  if (!hydrated) return null;
 
   if (!asset) {
     return (

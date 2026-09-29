@@ -15,7 +15,7 @@ import Image from "next/image";
 import { useMemo, useState } from "react";
 
 export default function OrdersPage() {
-  const { orders, hydrated } = useAdmin();
+  const { orders } = useAdmin();
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<AdminOrder | null>(null);
 
@@ -71,7 +71,6 @@ export default function OrdersPage() {
     },
   ];
 
-  if (!hydrated) return null;
 
   return (
     <div>

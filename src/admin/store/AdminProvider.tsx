@@ -52,7 +52,6 @@ import {
 import {
   isSeedPlaceholderVideo,
   recomputeMediaUsage,
-  rehydrateMediaObjectUrls,
   sanitizeMediaAssetsForStorage,
 } from "@/admin/lib/mediaPreview";
 import {
@@ -505,10 +504,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    const hydrateFromStorage = async () => {
+    const hydrateFromStorage = () => {
+      // Phase 0.5: metadata-only hydrate. Do NOT await rehydrateMediaObjectUrls()
+      // (that loads every IndexedDB original/preview/thumb + createObjectURL and
+      // blocked the entire Admin UI). Media surfaces restore bytes on demand via
+      // restoreObjectUrl() (MediaLibraryCardVisual, MediaPreviewPlayer, etc.).
       const loaded = loadState();
-      const mediaAssets = await rehydrateMediaObjectUrls(loaded.mediaAssets);
-      const syncedMedia = recomputeMediaUsage(mediaAssets, loaded.products);
+      const syncedMedia = recomputeMediaUsage(
+        loaded.mediaAssets,
+        loaded.products,
+      );
       const products = loaded.products.map((p) => {
         if (!p.mediaAssetId) return p;
         const asset = syncedMedia.find((a) => a.id === p.mediaAssetId);
@@ -524,13 +529,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       setHydrated(true);
     };
 
-    void hydrateFromStorage();
+    hydrateFromStorage();
 
     // Cross-tab only: StorageEvent does not fire in the writing tab.
     // Same-tab Admin + Storefront share this React context.
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return;
-      void hydrateFromStorage();
+      hydrateFromStorage();
     };
     window.addEventListener("storage", onStorage);
 
@@ -751,7 +756,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         (partial) => {
           updateMediaAsset(live.id, partial, null);
         },
-        async (snapshot) => {
+        async (snapshot, signal) => {
           const settings = mediaSettingsRef.current;
           const wm =
             snapshot.watermarkMode === "custom" && snapshot.watermarkConfig
@@ -776,6 +781,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               quality: fresh.previewQuality ?? settings.defaultPreviewQuality,
               watermark: wm,
               skipThumbnail: fresh.type === "image",
+              signal,
             },
           );
         },
@@ -798,86 +804,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [pushToast, startProcessingJob],
   );
 
-  // One-time: bake watermarked previews for assets that have a master blob
-  // but no generated preview yet (images + videos). Sequential to avoid hangs.
-  const previewKickoffRef = useRef(false);
-  useEffect(() => {
-    if (!hydrated || previewKickoffRef.current) return;
-
-    let cancelled = false;
-    let started = false;
-
-    const boot = window.setTimeout(() => {
-      if (cancelled || previewKickoffRef.current) return;
-      previewKickoffRef.current = true;
-      started = true;
-
-      const pendingIds = mediaAssetsRef.current
-        .filter((a) => {
-          if (a.preview.watermarkApplied) return false;
-          if (a.previewPlayback === "generated") return false;
-          if (
-            a.processingStatus === "processing" ||
-            a.processingStatus === "uploading" ||
-            a.processingStatus === "failed"
-          ) {
-            return false;
-          }
-          // Need a real master source to encode from
-          const hasMaster =
-            Boolean(a.hasLocalBlob) ||
-            (Boolean(a.master.url) &&
-              !a.master.url.startsWith("blob:") &&
-              !isSeedPlaceholderVideo(a.master.url));
-          return hasMaster;
-        })
-        .map((a) => a.id);
-
-      let index = 0;
-
-      const runNext = () => {
-        if (cancelled || index >= pendingIds.length) return;
-        const id = pendingIds[index++];
-        const asset = mediaAssetsRef.current.find((a) => a.id === id);
-        if (
-          !asset ||
-          asset.preview.watermarkApplied ||
-          asset.previewPlayback === "generated" ||
-          asset.processingStatus === "processing" ||
-          asset.processingStatus === "uploading"
-        ) {
-          window.setTimeout(runNext, 0);
-          return;
-        }
-        startProcessingJob(asset);
-        const startedAt = Date.now();
-        const poll = window.setInterval(() => {
-          const live = mediaAssetsRef.current.find((a) => a.id === id);
-          const done =
-            !live ||
-            live.processingStatus === "ready" ||
-            live.processingStatus === "failed" ||
-            live.preview.watermarkApplied ||
-            live.previewPlayback === "generated" ||
-            Date.now() - startedAt > 95_000;
-          if (done) {
-            window.clearInterval(poll);
-            window.setTimeout(runNext, 200);
-          }
-        }, 400);
-      };
-
-      runNext();
-    }, 300);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(boot);
-      if (!started) {
-        previewKickoffRef.current = false;
-      }
-    };
-  }, [hydrated, startProcessingJob]);
+  // Phase 0 Safari safety: do NOT auto-start preview encode after hydrate/refresh.
+  // Pending masters (hasLocalBlob / original-fallback) stay restored only.
+  // Processing still runs from uploadMasterVideos / replaceMasterVideo / regenerateMediaPreview.
+  // (Former previewKickoffRef mount effect removed — it called startProcessingJob → encodeCustomerPreview.)
 
   const uploadMasterVideos = useCallback(
     async (files: File[]): Promise<string[]> => {

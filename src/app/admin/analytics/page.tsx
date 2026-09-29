@@ -13,11 +13,10 @@ import { useState } from "react";
 type Range = "7D" | "30D" | "90D" | "12M";
 
 export default function AnalyticsPage() {
-  const { analytics, hydrated } = useAdmin();
+  const { analytics } = useAdmin();
   const [range, setRange] = useState<Range>("30D");
   const snap = analytics[range];
 
-  if (!hydrated) return null;
 
   return (
     <div>
