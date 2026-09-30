@@ -13,6 +13,12 @@ function isRuntimeUrl(src: ImageProps["src"]): src is string {
   );
 }
 
+function isMissingSrc(src: ImageProps["src"] | null | undefined): boolean {
+  if (src == null) return true;
+  if (typeof src === "string") return src.trim() === "";
+  return false;
+}
+
 export function CoverImage({
   src,
   alt,
@@ -23,6 +29,22 @@ export function CoverImage({
   const [failed, setFailed] = useState(false);
   const fallback =
     typeof src === "string" ? src.replace(/\.jpe?g(\?.*)?$/i, ".svg") : "";
+
+  // Empty/missing src must never reach next/image (crashes PDP for master-only products).
+  if (isMissingSrc(src)) {
+    return (
+      <div
+        aria-hidden={alt ? undefined : true}
+        role={alt ? "img" : undefined}
+        aria-label={alt || undefined}
+        className={cn(
+          fill && "absolute inset-0 h-full w-full",
+          "bg-surface-2",
+          className,
+        )}
+      />
+    );
+  }
 
   if (isRuntimeUrl(src)) {
     return (

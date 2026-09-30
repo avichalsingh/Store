@@ -21,6 +21,17 @@ function engagementLine(performance: ProductPerformance) {
   return `${likes?.value ?? "—"} likes · ${shares?.value ?? "—"} shares`;
 }
 
+/** Incomplete CMS/catalog performance must not mount CountUp (undefined template). */
+function hasCompletePrimaryMetric(
+  performance: ProductPerformance | null | undefined,
+): performance is ProductPerformance {
+  if (!performance) return false;
+  return (
+    typeof performance.primaryMetric === "string" &&
+    performance.primaryMetric.trim().length > 0
+  );
+}
+
 export function ViralPerformanceCard({
   performance,
   className,
@@ -38,6 +49,10 @@ export function ViralPerformanceCard({
     const t = window.setTimeout(() => setColorReady(true), 1100);
     return () => window.clearTimeout(t);
   }, [active, reduced]);
+
+  if (!hasCompletePrimaryMetric(performance)) {
+    return null;
+  }
 
   const badge = performance.badge?.trim() || "TRENDING NOW";
   const metricLabel = performance.primaryLabel?.trim() || "PLAYS";
