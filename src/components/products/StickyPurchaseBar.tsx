@@ -32,6 +32,10 @@ export function StickyPurchaseBar({
   const shares = video.performance?.secondaryMetrics.find((m) =>
     /share/i.test(m.label),
   );
+  const primary =
+    typeof video.performance?.primaryMetric === "string"
+      ? video.performance.primaryMetric.trim()
+      : "";
 
   useEffect(() => {
     const el = document.getElementById(targetId);
@@ -87,8 +91,8 @@ export function StickyPurchaseBar({
             🔥 TRENDING RIGHT NOW
           </p>
           <p className="hidden truncate text-sm text-text-dim sm:block">
-            {video.performance
-              ? `${video.performance.primaryMetric} plays · ${shares?.value ?? likes?.value ?? "—"} shares`
+            {primary
+              ? `${primary} plays · ${shares?.value ?? likes?.value ?? "—"} shares`
               : video.title}
           </p>
         </div>
