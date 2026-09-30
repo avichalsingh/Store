@@ -804,10 +804,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [pushToast, startProcessingJob],
   );
 
-  // Phase 0 Safari safety: do NOT auto-start preview encode after hydrate/refresh.
+  // Phase 0 / Phase 2 Safari safety: do NOT auto-start preview encode after
+  // hydrate/refresh OR after new video upload / master replace.
   // Pending masters (hasLocalBlob / original-fallback) stay restored only.
-  // Processing still runs from uploadMasterVideos / replaceMasterVideo / regenerateMediaPreview.
-  // (Former previewKickoffRef mount effect removed — it called startProcessingJob → encodeCustomerPreview.)
+  // Full-duration browser encode (encodeCustomerPreview) runs ONLY from
+  // regenerateMediaPreview (explicit Admin action).
+  // (Former previewKickoffRef mount effect removed — it called startProcessingJob.)
 
   const uploadMasterVideos = useCallback(
     async (files: File[]): Promise<string[]> => {
@@ -916,7 +918,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             ),
           }));
 
-          startProcessingJob(readyForProcess);
+          // Phase 2: do NOT auto-start full-duration browser encode on upload.
+          // Master is persisted; preview stays none until explicit regenerate.
         } catch {
           updateMediaAsset(
             id,
@@ -935,8 +938,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       if (ids.length) {
         pushToast(
           ids.length === 1
-            ? "Video uploaded — processing started"
-            : `${ids.length} videos uploaded — processing started`,
+            ? "Video uploaded — master ready"
+            : `${ids.length} videos uploaded — masters ready`,
         );
       }
 
@@ -945,7 +948,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [
       patch,
       pushToast,
-      startProcessingJob,
       state.mediaSettings.defaultPreviewQuality,
       state.mediaSettings.previewResolution,
       updateMediaAsset,
@@ -1066,8 +1068,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           return { ...prev, mediaAssets, products };
         });
 
-        startProcessingJob(readyForProcess);
-        pushToast("Master replaced — generating customer preview");
+        // Phase 2: do NOT auto-encode after master replace — explicit regenerate only.
+        pushToast("Master replaced — regenerate preview when ready");
       } catch {
         updateMediaAsset(
           assetId,
@@ -1084,7 +1086,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [
       patch,
       pushToast,
-      startProcessingJob,
       state.mediaAssets,
       updateMediaAsset,
     ],

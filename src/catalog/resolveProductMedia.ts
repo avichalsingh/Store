@@ -39,6 +39,14 @@ function isUsableCustomerPreview(
   return true;
 }
 
+/** Durable catalog/public URLs (never blob:). */
+function isDurableCatalogMediaUrl(url: string | undefined | null): boolean {
+  if (!url) return false;
+  if (url.startsWith("blob:") || url.startsWith("blob%3A")) return false;
+  if (isSeedPlaceholderVideo(url)) return false;
+  return /^(https?:\/\/|\/)/i.test(url.trim());
+}
+
 /**
  * Single resolver for product ↔ media used by Admin UI and storefront.
  *
@@ -68,9 +76,10 @@ export function resolveProductMedia(
       previewVideo = asset.preview.url;
     } else if (
       isUsableCustomerPreview(product.media.previewVideo, asset.master.url) &&
-      // Product-level copy of a real blob / non-placeholder URL
+      // Product-level copy: session blob, sized derivative, or durable HTTPS/path
       (product.media.previewVideo.startsWith("blob:") ||
-        Boolean(asset.preview.sizeBytes))
+        Boolean(asset.preview.sizeBytes) ||
+        isDurableCatalogMediaUrl(product.media.previewVideo))
     ) {
       previewVideo = product.media.previewVideo;
     } else if (
@@ -81,10 +90,9 @@ export function resolveProductMedia(
     ) {
       previewVideo = asset.master.url;
     }
-  } else if (
-    isUsableCustomerPreview(product.media.previewVideo) &&
-    product.media.previewVideo.startsWith("blob:")
-  ) {
+  } else if (isUsableCustomerPreview(product.media.previewVideo)) {
+    // Catalog API maps with empty mediaAssets — accept durable HTTPS/path
+    // (and session blob for admin-only preview). Never invent URLs.
     previewVideo = product.media.previewVideo;
   }
 

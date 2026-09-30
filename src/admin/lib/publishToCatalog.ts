@@ -1,7 +1,19 @@
 import type { AdminCharacter, AdminProduct, MediaAsset } from "@/admin/types";
+import {
+  prepareDurableMediaForPublish,
+  type DurableMediaProgressEvent,
+} from "@/admin/lib/uploadMediaToStorage";
 
 export type PublishCatalogResult =
-  | { ok: true; id: string; status: string }
+  | {
+      ok: true;
+      id: string;
+      status: string;
+      /** Product with durable media URLs after Storage upload (when applicable). */
+      product?: AdminProduct;
+      /** Media assets with durable URLs after Storage upload (when applicable). */
+      mediaAssets?: MediaAsset[];
+    }
   | { ok: false; error: string; status: number };
 
 export type PublishProductContext = {
@@ -11,6 +23,10 @@ export type PublishProductContext = {
   products: AdminProduct[];
   /** Full CMS media library (used to resolve mediaAssetId). */
   mediaAssets: MediaAsset[];
+};
+
+export type PublishProductOptions = {
+  onMediaProgress?: (event: DurableMediaProgressEvent) => void;
 };
 
 /** Collect real CMS dependency records needed to publish `product`. */
@@ -65,12 +81,43 @@ export function collectProductPublishDependencies(
 export async function publishProductToCatalog(
   product: AdminProduct,
   context: PublishProductContext,
+  options?: PublishProductOptions,
 ): Promise<PublishCatalogResult> {
+  let publishProduct = product;
+  let publishMediaAssets = context.mediaAssets;
+
+  // Phase 3 / 3.5: IndexedDB blobs → durable Storage (master/preview via TUS).
+  const mediaAssetId = product.mediaAssetId?.trim();
+  if (mediaAssetId) {
+    const asset = context.mediaAssets.find((a) => a.id === mediaAssetId);
+    if (!asset) {
+      return {
+        ok: false,
+        error: `Referenced media asset "${mediaAssetId}" does not exist in CMS.`,
+        status: 409,
+      };
+    }
+    const prepared = await prepareDurableMediaForPublish(product, asset, {
+      onProgress: options?.onMediaProgress,
+    });
+    if (!prepared.ok) {
+      return {
+        ok: false,
+        error: prepared.error,
+        status: prepared.status,
+      };
+    }
+    publishProduct = prepared.product;
+    publishMediaAssets = context.mediaAssets.map((a) =>
+      a.id === prepared.mediaAsset.id ? prepared.mediaAsset : a,
+    );
+  }
+
   const deps = collectProductPublishDependencies(
-    product,
+    publishProduct,
     context.characters,
     context.products,
-    context.mediaAssets,
+    publishMediaAssets,
   );
 
   let response: Response;
@@ -80,7 +127,7 @@ export async function publishProductToCatalog(
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
-        product,
+        product: publishProduct,
         characters: deps.characters,
         dependencyProducts: deps.dependencyProducts,
         mediaAssets: deps.mediaAssets,
@@ -115,8 +162,10 @@ export async function publishProductToCatalog(
 
   return {
     ok: true,
-    id: body.id ?? product.id,
-    status: body.status ?? product.status,
+    id: body.id ?? publishProduct.id,
+    status: body.status ?? publishProduct.status,
+    product: publishProduct,
+    mediaAssets: publishMediaAssets,
   };
 }
 

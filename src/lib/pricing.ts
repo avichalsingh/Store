@@ -83,18 +83,23 @@ export function getQuote(
   const tier = pricing?.[region];
   const regular = tier?.regularPrice ?? fallbackUsd;
   const sale = tier?.salePrice ?? fallbackUsd;
-  const live = isOfferLive(offer) && sale < regular;
-  const current = live ? sale : regular;
-  const discountPct =
-    regular > current ? Math.round(((regular - current) / regular) * 100) : 0;
+  /** Published CMS currentPrice (salePrice) is the authoritative charge amount. */
+  const current =
+    typeof sale === "number" && sale > 0 ? sale : regular;
+  /** Offer window controls countdown/badge/marketing only — not the selling price. */
+  const offerLive = Boolean(offer?.enabled) && isOfferLive(offer);
+  const hasCompareAtDiscount = regular > current;
+  const discountPct = hasCompareAtDiscount
+    ? Math.round(((regular - current) / regular) * 100)
+    : 0;
   return {
     current,
     regular,
-    saleActive: live,
+    saleActive: offerLive && hasCompareAtDiscount,
     discountPct,
-    label: live ? offer?.label : undefined,
-    endDate: live ? offer?.endDate : undefined,
-    discountText: live ? offer?.discountText : undefined,
+    label: offerLive ? offer?.label : undefined,
+    endDate: offerLive ? offer?.endDate : undefined,
+    discountText: offerLive ? offer?.discountText : undefined,
   };
 }
 

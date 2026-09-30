@@ -87,6 +87,14 @@ function storageRefFromUrl(url: string | undefined | null): {
     const path = raw.slice(raw.indexOf(previewsPrefix) + previewsPrefix.length);
     return { bucket: "media-previews", path };
   }
+  // Also accept explicit "media-masters/…" / "media-previews/…" storage refs
+  // (private master URLs are stored as bucket/path, not HTTPS).
+  if (raw.startsWith(mastersPrefix)) {
+    return { bucket: "media-masters", path: raw.slice(mastersPrefix.length) };
+  }
+  if (raw.startsWith(previewsPrefix)) {
+    return { bucket: "media-previews", path: raw.slice(previewsPrefix.length) };
+  }
   return { bucket: "", path: "" };
 }
 
@@ -138,6 +146,7 @@ export function adminMediaAssetToMediaAssetsRow(
   const type = normalizeMediaAssetType(asset.type);
   const masterRef = storageRefFromUrl(asset.master?.url);
   const previewRef = storageRefFromUrl(asset.preview?.url);
+  const thumbnailRef = storageRefFromUrl(asset.thumbnail?.url);
 
   return {
     id: asset.id.trim(),
@@ -149,7 +158,7 @@ export function adminMediaAssetToMediaAssetsRow(
     preview_bucket: previewRef.bucket || "",
     preview_path: previewRef.path || null,
     preview_url: durablePublicUrl(asset.preview?.url),
-    thumbnail_path: null,
+    thumbnail_path: thumbnailRef.path || null,
     thumbnail_url: durablePublicUrl(asset.thumbnail?.url),
     mime_type: mimeFromAsset(asset),
     size_bytes:

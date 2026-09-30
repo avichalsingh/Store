@@ -121,6 +121,7 @@ export function ProductEditor({
     collections,
     mediaAssets,
     upsertProduct,
+    updateMediaAsset,
     hydrated,
     pushToast,
   } = useAdmin();
@@ -130,6 +131,9 @@ export function ProductEditor({
   const [draft, setDraft] = useState<AdminProduct | null>(null);
   const [baseline, setBaseline] = useState<string>("");
   const [publishing, setPublishing] = useState(false);
+  const [publishProgressLabel, setPublishProgressLabel] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!hydrated) return;
@@ -201,22 +205,53 @@ export function ProductEditor({
     }
 
     setPublishing(true);
+    setPublishProgressLabel("Preparing media…");
     try {
-      const result = await publishProductToCatalog(next, {
-        characters,
-        products,
-        mediaAssets,
-      });
+      const result = await publishProductToCatalog(
+        next,
+        {
+          characters,
+          products,
+          mediaAssets,
+        },
+        {
+          onMediaProgress: ({ phase, pct }) => {
+            const label =
+              phase === "master"
+                ? "Uploading master"
+                : phase === "preview"
+                  ? "Uploading preview"
+                  : "Uploading thumbnail";
+            setPublishProgressLabel(`${label} ${pct}%`);
+          },
+        },
+      );
       if (!result.ok) {
         pushToast(result.error, "error");
         return;
       }
-      upsertProduct(next, "Product published");
-      setDraft(next);
-      setBaseline(JSON.stringify(next));
-      if (!productId) router.replace(`/admin/products/${next.id}/edit`);
+      setPublishProgressLabel("Saving catalog…");
+      const published = result.product ?? next;
+      if (result.mediaAssets) {
+        for (const asset of result.mediaAssets) {
+          const prev = mediaAssets.find((a) => a.id === asset.id);
+          if (
+            !prev ||
+            prev.master.url !== asset.master.url ||
+            prev.preview.url !== asset.preview.url ||
+            prev.thumbnail.url !== asset.thumbnail.url
+          ) {
+            updateMediaAsset(asset.id, asset, null);
+          }
+        }
+      }
+      upsertProduct(published, "Product published");
+      setDraft(published);
+      setBaseline(JSON.stringify(published));
+      if (!productId) router.replace(`/admin/products/${published.id}/edit`);
     } finally {
       setPublishing(false);
+      setPublishProgressLabel(null);
     }
   };
 
@@ -249,7 +284,9 @@ export function ProductEditor({
               onClick={() => void save("active")}
               disabled={publishing}
             >
-              {publishing ? "Publishing…" : "Publish"}
+              {publishing
+                ? publishProgressLabel || "Publishing…"
+                : "Publish"}
             </AdminButton>
           </>
         }
