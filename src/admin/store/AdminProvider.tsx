@@ -137,7 +137,7 @@ type AdminContextValue = AdminCmsState & {
    * Regenerate only the customer Preview Image/Video for an existing asset.
    * Does not re-upload or modify the Master file.
    */
-  regenerateMediaPreview: (assetId: string) => void;
+  regenerateMediaPreview: (assetId: string, productIdHint?: string) => void;
   attachMediaToProduct: (productId: string, assetId: string) => void;
   detachMediaFromProduct: (productId: string) => void;
   /** Attach a Media Library image to an AI Image product's selected assets. */
@@ -792,24 +792,167 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   );
 
   const regenerateMediaPreview = useCallback(
-    (assetId: string) => {
+    (assetId: string, productIdHint?: string) => {
       const asset = mediaAssetsRef.current.find((a) => a.id === assetId);
       if (!asset) {
         pushToast("Media asset not found", "error");
         return;
       }
-      startProcessingJob(asset);
-      pushToast("Regenerating preview — master file is unchanged");
+
+      // Images keep the legacy local path. Video production previews are
+      // server/worker FFmpeg only — never browser encodeCustomerPreview.
+      if (asset.type === "image") {
+        startProcessingJob(asset);
+        pushToast("Regenerating preview — master file is unchanged");
+        return;
+      }
+
+      const productId =
+        productIdHint?.trim() ||
+        asset.usedByProductIds?.[0]?.trim() ||
+        undefined;
+
+      updateMediaAsset(
+        assetId,
+        {
+          processingStatus: "queued",
+          processingError: undefined,
+          processingSteps: {
+            ...asset.processingSteps,
+            uploadComplete: true,
+            previewGenerating: true,
+            previewReady: false,
+            watermarkApplying: true,
+            watermarkReady: false,
+            thumbnailExtracting: true,
+            thumbnailReady: false,
+          },
+        },
+        null,
+      );
+      pushToast("Queuing server preview generation…");
+
+      void (async () => {
+        updateMediaAsset(
+          assetId,
+          { processingStatus: "processing" },
+          null,
+        );
+        try {
+          const res = await fetch("/api/admin/media/process", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              mediaAssetId: assetId,
+              ...(productId ? { productId } : {}),
+              force: true,
+            }),
+          });
+          const data = (await res.json().catch(() => null)) as {
+            ok?: boolean;
+            status?: string;
+            error?: string;
+            message?: string;
+            previewUrl?: string;
+            thumbnailUrl?: string;
+            skipped?: boolean;
+          } | null;
+
+          if (!res.ok || !data?.ok) {
+            const err =
+              data?.error ||
+              data?.message ||
+              `Preview processing failed (${res.status})`;
+            updateMediaAsset(
+              assetId,
+              {
+                processingStatus: "failed",
+                processingError: err,
+                processingSteps: {
+                  ...asset.processingSteps,
+                  previewGenerating: false,
+                  previewReady: false,
+                  watermarkApplying: false,
+                  watermarkReady: false,
+                  thumbnailExtracting: false,
+                  thumbnailReady: false,
+                },
+              },
+              null,
+            );
+            pushToast(err, "error");
+            return;
+          }
+
+          if (data.status === "processing") {
+            pushToast("Preview already processing");
+            return;
+          }
+
+          const previewUrl = data.previewUrl?.trim() || "";
+          const thumbnailUrl = data.thumbnailUrl?.trim() || "";
+          updateMediaAsset(
+            assetId,
+            {
+              processingStatus: "ready",
+              processingError: undefined,
+              previewPlayback: "generated",
+              previewStale: false,
+              preview: {
+                ...asset.preview,
+                url: previewUrl || asset.preview.url,
+                status: "ready",
+                quality: asset.previewQuality ?? asset.preview.quality,
+                watermarkApplied: true,
+                access: "public",
+                resolution: "<=540x960",
+              },
+              thumbnail: {
+                ...asset.thumbnail,
+                url: thumbnailUrl || asset.thumbnail.url,
+                source:
+                  asset.thumbnail.source === "custom" ? "custom" : "frame",
+              },
+              processingSteps: {
+                uploadComplete: true,
+                previewGenerating: false,
+                previewReady: true,
+                watermarkApplying: false,
+                watermarkReady: true,
+                thumbnailExtracting: false,
+                thumbnailReady: true,
+              },
+            },
+            data.skipped
+              ? "Preview already ready"
+              : "Customer preview generated (server FFmpeg)",
+          );
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Preview processing failed";
+          updateMediaAsset(
+            assetId,
+            {
+              processingStatus: "failed",
+              processingError: message,
+            },
+            null,
+          );
+          pushToast(message, "error");
+        }
+      })();
     },
-    [pushToast, startProcessingJob],
+    [pushToast, startProcessingJob, updateMediaAsset],
   );
 
-  // Phase 0 / Phase 2 Safari safety: do NOT auto-start preview encode after
+  // Phase 0 / Phase 2 / Phase 5A: do NOT auto-start preview encode after
   // hydrate/refresh OR after new video upload / master replace.
   // Pending masters (hasLocalBlob / original-fallback) stay restored only.
-  // Full-duration browser encode (encodeCustomerPreview) runs ONLY from
-  // regenerateMediaPreview (explicit Admin action).
-  // (Former previewKickoffRef mount effect removed — it called startProcessingJob.)
+  // Production video preview runs ONLY via POST /api/admin/media/process
+  // from regenerateMediaPreview (explicit Admin action) → dedicated worker.
+  // Browser encodeCustomerPreview / startProcessingJob stay disconnected
+  // from production video upload (images may still use local derivatives).
 
   const uploadMasterVideos = useCallback(
     async (files: File[]): Promise<string[]> => {

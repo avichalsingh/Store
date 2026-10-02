@@ -25,7 +25,6 @@ import {
   restoreObjectUrl,
 } from "@/admin/services/mediaBlobStore";
 import {
-  materializePreviewAndThumbnail,
   mergeWatermarkConfig,
   persistFrameThumbnail,
 } from "@/admin/services/mediaDerivatives";
@@ -33,7 +32,6 @@ import { useAdmin } from "@/admin/store/AdminProvider";
 import type {
   AdminProduct,
   PreviewQuality,
-  WatermarkConfig,
   WatermarkMovement,
   WatermarkSize,
   WatermarkStyle,
@@ -103,6 +101,7 @@ export function ProductMediaSection({
     updateMediaAsset,
     attachMediaToProduct,
     detachMediaFromProduct,
+    regenerateMediaPreview,
     pushToast,
   } = useAdmin();
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -112,7 +111,6 @@ export function ProductMediaSection({
   const [frameBusy, setFrameBusy] = useState(false);
   const [wmPreviewOpen, setWmPreviewOpen] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
-  const [regenProgress, setRegenProgress] = useState<number | null>(null);
   const [masterFrameSrc, setMasterFrameSrc] = useState("");
 
   const asset = useMemo(
@@ -273,55 +271,33 @@ export function ProductMediaSection({
 
   const regeneratePreview = async () => {
     if (!asset) return;
-    const hasMaster =
-      Boolean(getSessionObjectUrl(asset.id, "original")) ||
-      Boolean(asset.hasLocalBlob) ||
-      (Boolean(asset.master.url) &&
-        asset.master.url.startsWith("blob:"));
-    if (!hasMaster) {
-      // Try restoring from IndexedDB before giving up
-      const restored = await restoreObjectUrl(asset.id, "original");
-      if (!restored) {
-        pushToast(
-          "No master video in storage — re-upload the master to generate a preview",
-          "error",
-        );
-        setReplaceUploadOpen(true);
-        return;
-      }
+    // Production path: Admin session → POST /api/admin/media/process → FFmpeg worker.
+    // Requires a durable private master in Storage (not browser-local only).
+    const hasDurableMasterRef =
+      Boolean(asset.master.url) &&
+      !asset.master.url.startsWith("blob:") &&
+      (asset.master.url.includes("media-masters/") ||
+        Boolean(draft.id));
+    if (!hasDurableMasterRef && !draft.id) {
+      pushToast(
+        "Publish or attach this media to a product with a durable master first",
+        "error",
+      );
+      return;
     }
     setRegenBusy(true);
-    setRegenProgress(0);
-    try {
-      const wm = mergeWatermarkConfig(
-        mediaSettings.watermark,
-        draft.watermarkMode ?? asset.watermarkMode ?? "global",
-        draft.watermarkOverride ?? asset.watermarkConfig,
-      );
-      const quality =
-        draft.previewQuality ?? asset.previewQuality ?? "optimized";
-      await materializePreviewAndThumbnail(
-        asset,
-        (partial) => {
-          updateMediaAsset(asset.id, partial, null);
-        },
-        {
-          quality,
-          watermark: wm,
-          // Re-capture clean master frames; only skip when admin uploaded a custom image
-          skipThumbnail:
-            asset.thumbnail.source === "custom" && Boolean(asset.thumbnail.url),
-          onProgress: (pct) => setRegenProgress(pct),
-        },
-      );
-      pushToast("Customer preview regenerated (derivative + watermark)");
-    } catch {
-      pushToast("Preview regeneration failed", "error");
-    } finally {
-      setRegenBusy(false);
-      setRegenProgress(null);
-    }
+    regenerateMediaPreview(asset.id, draft.id);
   };
+
+  useEffect(() => {
+    if (!regenBusy || !asset) return;
+    if (
+      asset.processingStatus === "ready" ||
+      asset.processingStatus === "failed"
+    ) {
+      setRegenBusy(false);
+    }
+  }, [asset, asset?.processingStatus, regenBusy]);
 
   const markPreviewStale = (patch: Partial<AdminProduct> = {}) => {
     onChange({ ...draft, ...patch });
@@ -554,9 +530,9 @@ export function ProductMediaSection({
                 watermark into the customer file.
               </p>
             ) : null}
-            {regenProgress != null ? (
+            {regenBusy ? (
               <p className="text-xs text-[var(--admin-muted)]">
-                Encoding… {regenProgress}%
+                Generating preview on server worker…
               </p>
             ) : null}
             <dl className="grid gap-2 text-sm sm:grid-cols-2">
