@@ -1,8 +1,12 @@
 import { createWriteStream } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  WATERMARK_LOGO_BUCKET,
+  isAllowedWatermarkLogoPath,
+} from "./watermark.js";
 
 export const MEDIA_MASTERS_BUCKET = "media-masters";
 export const MEDIA_PREVIEWS_BUCKET = "media-previews";
@@ -91,6 +95,34 @@ export async function downloadMasterToFile(
     const message = err instanceof Error ? err.message : "stream failed";
     throw new Error(`Failed to stream private master to disk: ${message}`);
   }
+}
+
+/**
+ * Download the allowlisted watermark logo from private Storage to a temp file.
+ * Never accepts arbitrary buckets/URLs — path must match system/watermark-logo.(png|webp).
+ */
+export async function downloadWatermarkLogoToFile(
+  supabase: SupabaseClient,
+  path: string,
+  destFile: string,
+): Promise<void> {
+  const safePath = path.trim();
+  if (!isAllowedWatermarkLogoPath(safePath)) {
+    throw new Error("Invalid watermark logo path");
+  }
+  const { data, error } = await supabase.storage
+    .from(WATERMARK_LOGO_BUCKET)
+    .download(safePath);
+  if (error || !data) {
+    throw new Error(
+      `Failed to download watermark logo: ${error?.message ?? "object missing"}`,
+    );
+  }
+  const buf = Buffer.from(await data.arrayBuffer());
+  if (buf.byteLength <= 0) {
+    throw new Error("Watermark logo object is empty");
+  }
+  await writeFile(destFile, buf);
 }
 
 export async function uploadPublicObject(

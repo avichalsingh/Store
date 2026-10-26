@@ -7,6 +7,9 @@ import {
   type WorkerProcessResult,
 } from "./processJob.js";
 
+/** In-flight jobs by mediaAssetId — prevents concurrent FFmpeg for one asset. */
+const activeJobs = new Set<string>();
+
 function readJson(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -71,6 +74,11 @@ function parsePayload(body: unknown): WorkerProcessPayload | null {
     masterBucket,
     masterPath,
     force: Boolean(o.force),
+    async: Boolean(o.async),
+    watermark:
+      o.watermark && typeof o.watermark === "object"
+        ? (o.watermark as Record<string, unknown>)
+        : undefined,
   };
 }
 
@@ -82,7 +90,11 @@ async function main(): Promise<void> {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
     if (req.method === "GET" && url.pathname === "/health") {
-      sendJson(res, 200, { ok: true, service: "rhythm-media-worker" });
+      sendJson(res, 200, {
+        ok: true,
+        service: "rhythm-media-worker",
+        activeJobs: activeJobs.size,
+      });
       return;
     }
 
@@ -110,8 +122,75 @@ async function main(): Promise<void> {
         return;
       }
 
-      const result = await runJob(payload);
-      sendJson(res, result.ok ? 200 : 500, result);
+      const { mediaAssetId, force, async: runAsync } = payload;
+
+      // Idempotent: one concurrent FFmpeg job per asset.
+      if (activeJobs.has(mediaAssetId) && !force) {
+        sendJson(res, 202, {
+          ok: true,
+          accepted: true,
+          status: "processing",
+          mediaAssetId,
+          message: "Job already in progress",
+        });
+        return;
+      }
+
+      if (runAsync) {
+        if (activeJobs.has(mediaAssetId) && force) {
+          // Force while in-flight: do not start a second FFmpeg — caller should poll.
+          sendJson(res, 202, {
+            ok: true,
+            accepted: true,
+            status: "processing",
+            mediaAssetId,
+            message: "Job already in progress",
+          });
+          return;
+        }
+
+        activeJobs.add(mediaAssetId);
+        sendJson(res, 202, {
+          ok: true,
+          accepted: true,
+          status: "queued",
+          mediaAssetId,
+          message: "Job accepted — processing in background",
+        });
+
+        void runJob(payload)
+          .catch((err) => {
+            // eslint-disable-next-line no-console
+            console.error(
+              `[worker] async job failed mediaAssetId=${mediaAssetId}`,
+              err instanceof Error ? err.message : err,
+            );
+          })
+          .finally(() => {
+            activeJobs.delete(mediaAssetId);
+          });
+        return;
+      }
+
+      // Legacy synchronous path (holds HTTP until FFmpeg finishes).
+      if (activeJobs.has(mediaAssetId)) {
+        sendJson(res, 202, {
+          ok: true,
+          accepted: true,
+          status: "processing",
+          mediaAssetId,
+          message: "Job already in progress",
+        });
+        return;
+      }
+
+      activeJobs.add(mediaAssetId);
+      try {
+        const result = await runJob(payload);
+        sendJson(res, result.ok ? 200 : 500, result);
+      } finally {
+        activeJobs.delete(mediaAssetId);
+      }
       return;
     }
 

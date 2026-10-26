@@ -4,6 +4,7 @@ import { AdminThumb } from "@/admin/components/ui/AdminThumb";
 import {
   getMasterVideoUrl,
   getPosterUrl,
+  isPrivateMasterStorageRef,
   isUsableAdminMediaUrl,
   isVideoUrl,
   resolveAdminMasterDisplayUrl,
@@ -286,6 +287,8 @@ export function MediaLibraryCardVisual({
     );
   }
 
+  const privateMasterUploaded = isPrivateMasterStorageRef(asset.master.url);
+
   return (
     <div
       className={cn(
@@ -299,9 +302,13 @@ export function MediaLibraryCardVisual({
         <Film className="h-8 w-8" />
       )}
       <p className="text-[11px] font-medium uppercase tracking-wide">
-        No master file
+        {privateMasterUploaded ? "Original uploaded" : "No master file"}
       </p>
-      <p className="text-[10px]">Upload a master to manage this asset</p>
+      <p className="text-[10px]">
+        {privateMasterUploaded
+          ? "Generate Preview to create customer assets"
+          : "Upload a master to manage this asset"}
+      </p>
     </div>
   );
 }

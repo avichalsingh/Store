@@ -1,9 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   mapCatalogViewsToProducts,
+  type CatalogMediaPublicRow,
   type CatalogProductRow,
   type CatalogRelationshipRow,
 } from "@/catalog/mapSupabaseProduct";
+import { createServiceClient } from "@/lib/supabase/admin";
 import type { CatalogProduct } from "@/types";
 import { NextResponse } from "next/server";
 
@@ -29,8 +31,38 @@ function getPublicClient() {
 }
 
 /**
+ * Load public preview/thumbnail fields for referenced media assets.
+ * Uses service role server-side only; never selects master_path/bucket.
+ */
+async function loadPublicMediaRows(
+  mediaAssetIds: string[],
+): Promise<CatalogMediaPublicRow[]> {
+  const ids = [...new Set(mediaAssetIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return [];
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) return [];
+
+  try {
+    const supabase = createServiceClient();
+    const { data, error } = await supabase
+      .from("media_assets")
+      .select("id, preview_url, thumbnail_url, preview_playback, updated_at")
+      .in("id", ids);
+    if (error) {
+      console.error("[api/catalog] media_assets public fields:", error.message);
+      return [];
+    }
+    return (data ?? []) as CatalogMediaPublicRow[];
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "media_assets load failed";
+    console.error("[api/catalog] media_assets public fields:", message);
+    return [];
+  }
+}
+
+/**
  * Public storefront catalog.
- * Reads only `catalog_products` + `catalog_product_relationships` (never raw `products`).
+ * Reads `catalog_products` + relationships, and enriches customer preview
+ * URLs from media_assets public fields (never private masters).
  */
 export async function GET() {
   try {
@@ -69,9 +101,16 @@ export async function GET() {
       );
     }
 
+    const productRows = (productsResult.data ?? []) as CatalogProductRow[];
+    const mediaAssetIds = productRows
+      .map((p) => p.media_asset_id)
+      .filter((id): id is string => Boolean(id?.trim()));
+    const mediaRows = await loadPublicMediaRows(mediaAssetIds);
+
     const products = mapCatalogViewsToProducts(
-      (productsResult.data ?? []) as CatalogProductRow[],
+      productRows,
       (relationshipsResult.data ?? []) as CatalogRelationshipRow[],
+      mediaRows,
     );
 
     return NextResponse.json({

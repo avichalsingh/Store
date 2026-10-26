@@ -4,11 +4,43 @@
  */
 
 import type { AdminProduct } from "@/admin/types";
+import { isPublicCustomerMediaUrl } from "@/admin/lib/mediaPreview";
 import type { ProductRelationship } from "@/catalog/productPayloads";
 import { adminProductToCatalog } from "@/catalog/mapAdminToStorefront";
 import { defaultImagePdpGlobalSettings } from "@/catalog/imagePdpTypes";
 import { isProductType, type ProductRelationshipType } from "@/catalog/productTypes";
 import type { CaptionPackProductPublic, CatalogProduct } from "@/types";
+
+/** Public-safe media_assets fields for catalog enrichment (never masters). */
+export type CatalogMediaPublicRow = {
+  id: string;
+  preview_url: string | null;
+  thumbnail_url: string | null;
+  preview_playback: string | null;
+  /** Used only to cache-bust public URLs after in-place Storage overwrites. */
+  updated_at?: string | null;
+};
+
+/**
+ * Append ?v=<updated_at ms> so browsers do not keep a silent/stale preview
+ * after the worker overwrites the same Storage path.
+ */
+function withMediaCacheBust(
+  url: string,
+  updatedAt?: string | null,
+): string {
+  const raw = url.trim();
+  if (!raw || !updatedAt) return raw;
+  const t = Date.parse(updatedAt);
+  if (!Number.isFinite(t)) return raw;
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.set("v", String(t));
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
 
 /** Row shape from `catalog_products` (PostgREST / snake_case). */
 export type CatalogProductRow = {
@@ -244,14 +276,62 @@ function patchCaptionPackPublic(
 }
 
 /**
+ * Merge durable public preview/thumbnail from media_assets into the product
+ * media JSON when catalog_products.media omitted them (common after worker
+ * processing without a republish that copied URLs onto the product row).
+ * Never copies private master paths.
+ */
+function enrichAdminProductFromMediaAsset(
+  product: AdminProduct,
+  media: CatalogMediaPublicRow | undefined,
+): AdminProduct {
+  if (!media) return product;
+
+  const previewFromAsset =
+    media.preview_playback === "generated" &&
+    isPublicCustomerMediaUrl(media.preview_url)
+      ? media.preview_url!.trim()
+      : "";
+  const thumbFromAsset = isPublicCustomerMediaUrl(media.thumbnail_url)
+    ? media.thumbnail_url!.trim()
+    : "";
+
+  if (!previewFromAsset && !thumbFromAsset) return product;
+
+  const existingPreview = product.media.previewVideo?.trim() || "";
+  const preferExistingPreview = isPublicCustomerMediaUrl(existingPreview);
+  const previewRaw = preferExistingPreview
+    ? existingPreview
+    : previewFromAsset || existingPreview || "";
+  const thumbRaw =
+    thumbFromAsset || product.media.thumbnail?.trim() || "";
+
+  return {
+    ...product,
+    media: {
+      ...product.media,
+      previewVideo: previewRaw
+        ? withMediaCacheBust(previewRaw, media.updated_at)
+        : undefined,
+      thumbnail: thumbRaw
+        ? withMediaCacheBust(thumbRaw, media.updated_at)
+        : "",
+    },
+  };
+}
+
+/**
  * Convert catalog view rows + relationship rows into public CatalogProduct[].
+ * Optional mediaRows supply public preview/thumbnail from media_assets.
  * Does not merge CMS/static products.
  */
 export function mapCatalogViewsToProducts(
   productRows: CatalogProductRow[],
   relationshipRows: CatalogRelationshipRow[],
+  mediaRows: CatalogMediaPublicRow[] = [],
 ): CatalogProduct[] {
   const byProduct = groupRelationships(relationshipRows);
+  const mediaById = new Map(mediaRows.map((m) => [m.id, m]));
 
   const adminProducts: Array<
     AdminProduct & {
@@ -264,13 +344,21 @@ export function mapCatalogViewsToProducts(
       row,
       byProduct.get(row.id) ?? [],
     );
-    if (admin) adminProducts.push(admin);
+    if (!admin) continue;
+    const mediaId = admin.mediaAssetId?.trim();
+    adminProducts.push(
+      enrichAdminProductFromMediaAsset(
+        admin,
+        mediaId ? mediaById.get(mediaId) : undefined,
+      ),
+    );
   }
 
   const settings = defaultImagePdpGlobalSettings();
   const out: CatalogProduct[] = [];
 
   for (const admin of adminProducts) {
+    // Empty mediaAssets: storefront uses enriched product.media.previewVideo only.
     const mapped = adminProductToCatalog(
       admin,
       [],

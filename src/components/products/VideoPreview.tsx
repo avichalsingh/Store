@@ -117,6 +117,8 @@ export function VideoPreview({
           }, 8000);
         });
       }
+      // User gesture: unmute so AAC in the preview can be heard on PDP.
+      video.muted = false;
       await video.play();
       setPlaying(true);
     } catch {
@@ -189,13 +191,24 @@ export function VideoPreview({
         <video
           ref={videoRef}
           src={previewVideo}
-          muted
+          // Hover-autoplay cards must stay muted (browser policy).
+          // PDP click-to-play is a user gesture — allow sound; controls unmute/mute.
+          muted={autoPlayOnHover}
           loop
           playsInline
+          controls={clickToPlay}
           preload={clickToPlay ? "metadata" : "none"}
           controlsList="nodownload noremoteplayback noplaybackrate"
           disablePictureInPicture
           disableRemotePlayback
+          onClick={
+            clickToPlay
+              ? (e) => {
+                  // Let native controls receive clicks; outer div handles play toggle.
+                  e.stopPropagation();
+                }
+              : undefined
+          }
           onPlaying={() => {
             setPlaying(true);
             setLoading(false);
@@ -215,6 +228,7 @@ export function VideoPreview({
           className={cn(
             "absolute inset-0 z-[1] h-full w-full origin-center object-cover transition duration-300",
             showVideoLayer ? "scale-[1.02] opacity-100" : "opacity-0",
+            clickToPlay && playing && "z-[5]",
           )}
         />
       ) : null}
@@ -254,6 +268,12 @@ export function VideoPreview({
           {!previewVideo
             ? " — regenerate the customer preview in Admin."
             : null}
+        </div>
+      ) : null}
+
+      {!previewVideo && !error ? (
+        <div className="pointer-events-none absolute inset-x-3 bottom-3 z-[4] rounded-lg bg-black/75 px-3 py-2 text-center text-[11px] font-medium text-white">
+          Preview not ready yet
         </div>
       ) : null}
 

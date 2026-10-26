@@ -61,6 +61,22 @@ import {
 } from "@/admin/services/mediaBlobStore";
 import { materializePreviewAndThumbnail } from "@/admin/services/mediaDerivatives";
 import { simulateProcessing } from "@/admin/services/mediaProcessing";
+import {
+  productIdFromDurableMasterRef,
+} from "@/admin/lib/mediaPreview";
+import {
+  LIBRARY_MEDIA_PRODUCT_ID,
+  uploadVideoDirect,
+} from "@/admin/lib/uploadMediaToStorage";
+import {
+  enqueueMediaProcess,
+  waitForMediaProcessReady,
+} from "@/admin/lib/mediaProcessClient";
+import {
+  listEligibleVideoAssetsForWatermarkRefresh,
+  WATERMARK_REFRESH_MAX_IN_FLIGHT,
+  type WatermarkRefreshProgress,
+} from "@/admin/lib/watermarkPreviewRefresh";
 import { CMS_STORAGE_KEY } from "@/catalog/cmsEvents";
 import type {
   AdminCampaign,
@@ -127,12 +143,37 @@ type AdminContextValue = AdminCmsState & {
   updateMediaAsset: (id: string, partial: Partial<MediaAsset>, toast?: string | null) => void;
   deleteMediaAsset: (id: string) => void;
   setMediaSettings: (settings: GlobalMediaSettings, toast?: string) => void;
+  /**
+   * Explicit bulk refresh of eligible durable video previews after watermark/quality
+   * settings change. Never called automatically from setMediaSettings.
+   */
+  refreshEligibleWatermarkPreviews: (opts: {
+    wmChanged: boolean;
+    qualityChanged: boolean;
+  }) => void;
+  /** Progress of explicit watermark preview refresh (null when idle). */
+  watermarkRefreshProgress: WatermarkRefreshProgress | null;
   setImagePdpSettings: (settings: ImagePdpGlobalSettings, toast?: string) => void;
-  uploadMasterVideos: (files: File[]) => Promise<string[]>;
+  uploadMasterVideos: (
+    files: File[],
+    options?: {
+      productId?: string;
+      onProgress?: (fileIndex: number, pct: number) => void;
+      abortSignals?: Array<AbortSignal | undefined>;
+    },
+  ) => Promise<string[]>;
   /** Upload still images into the Media Library (ready immediately). */
   uploadMasterImages: (files: File[]) => Promise<string[]>;
-  /** Replace the master file on an existing asset and regenerate the customer preview. */
-  replaceMasterVideo: (assetId: string, file: File) => Promise<void>;
+  /** Replace the master file on an existing asset (durable Storage upload). */
+  replaceMasterVideo: (
+    assetId: string,
+    file: File,
+    options?: {
+      productId?: string;
+      onProgress?: (pct: number) => void;
+      abortSignal?: AbortSignal;
+    },
+  ) => Promise<void>;
   /**
    * Regenerate only the customer Preview Image/Video for an existing asset.
    * Does not re-upload or modify the Master file.
@@ -499,7 +540,29 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AdminCmsState>(() => createSeedState());
   const [hydrated, setHydrated] = useState(false);
   const [toasts, setToasts] = useState<AdminToast[]>([]);
+  const [watermarkRefreshProgress, setWatermarkRefreshProgress] =
+    useState<WatermarkRefreshProgress | null>(null);
   const cancelJobsRef = useRef<Map<string, () => void>>(new Map());
+  /** AbortControllers for async preview status polls (one per asset). */
+  const previewPollAbortRef = useRef<Map<string, AbortController>>(new Map());
+  /** Save-triggered refresh: generation bumps invalidate in-flight batch work. */
+  const watermarkRefreshGenRef = useRef(0);
+  const watermarkRefreshQueueRef = useRef<string[]>([]);
+  const watermarkRefreshInFlightRef = useRef(0);
+  const watermarkRefreshActiveIdsRef = useRef(new Set<string>());
+  const watermarkRefreshCountsRef = useRef({
+    succeeded: 0,
+    failed: 0,
+    total: 0,
+  });
+  const beginWatermarkRefreshRef = useRef<
+    | ((opts: { wmChanged: boolean; qualityChanged: boolean }) => void)
+    | null
+  >(null);
+  const mediaAssetsRef = useRef(state.mediaAssets);
+  mediaAssetsRef.current = state.mediaAssets;
+  const mediaSettingsRef = useRef(state.mediaSettings);
+  mediaSettingsRef.current = state.mediaSettings;
 
   useEffect(() => {
     let cancelled = false;
@@ -699,29 +762,40 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const setMediaSettings = useCallback(
     (settings: GlobalMediaSettings, toast = "Media settings saved") => {
+      let wmChanged = false;
+      let qualityChanged = false;
       patch((prev) => {
-        const wmChanged =
+        wmChanged =
           JSON.stringify(prev.mediaSettings.watermark) !==
           JSON.stringify(settings.watermark);
-        const qualityChanged =
+        qualityChanged =
           prev.mediaSettings.defaultPreviewQuality !==
           settings.defaultPreviewQuality;
         const mediaAssets =
           wmChanged || qualityChanged
             ? prev.mediaAssets.map((a) =>
-                a.watermarkMode === "global" || qualityChanged
-                  ? { ...a, previewStale: true, updatedAt: new Date().toISOString() }
+                a.watermarkMode !== "custom" || qualityChanged
+                  ? {
+                      ...a,
+                      previewStale: true,
+                      updatedAt: new Date().toISOString(),
+                    }
                   : a,
               )
             : prev.mediaAssets;
         return { ...prev, mediaSettings: settings, mediaAssets };
       });
-      pushToast(
-        toast +
-          (toast.includes("regenerate")
-            ? ""
-            : " — regenerate previews to apply watermark/quality"),
-      );
+      // Keep mediaSettingsRef current for any in-flight enqueue that reads it.
+      mediaSettingsRef.current = settings;
+      if (wmChanged || qualityChanged) {
+        pushToast(
+          toast.includes("outdated") || toast.includes("regenerat")
+            ? toast
+            : `${toast} — previews marked outdated until you regenerate`,
+        );
+      } else {
+        pushToast(toast);
+      }
     },
     [patch, pushToast],
   );
@@ -736,11 +810,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     },
     [patch, pushToast],
   );
-
-  const mediaAssetsRef = useRef(state.mediaAssets);
-  mediaAssetsRef.current = state.mediaAssets;
-  const mediaSettingsRef = useRef(state.mediaSettings);
-  mediaSettingsRef.current = state.mediaSettings;
 
   const startProcessingJob = useCallback(
     (asset: MediaAsset) => {
@@ -791,6 +860,460 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     [updateMediaAsset],
   );
 
+  const applyReadyPreview = useCallback(
+    (
+      assetId: string,
+      previewUrl: string,
+      thumbnailUrl: string,
+      toast?: string | null,
+    ) => {
+      const asset = mediaAssetsRef.current.find((a) => a.id === assetId);
+      updateMediaAsset(
+        assetId,
+        {
+          processingStatus: "ready",
+          processingError: undefined,
+          previewPlayback: "generated",
+          previewStale: false,
+          preview: {
+            ...(asset?.preview ?? {
+              url: "",
+              status: "ready" as const,
+              resolution: "",
+              quality: "optimized" as const,
+              watermarkApplied: true,
+              access: "public" as const,
+            }),
+            url: previewUrl,
+            status: "ready",
+            quality: asset?.previewQuality ?? asset?.preview.quality ?? "optimized",
+            watermarkApplied: true,
+            access: "public",
+            resolution: "<=540x960",
+          },
+          thumbnail: {
+            ...(asset?.thumbnail ?? {
+              url: "",
+              source: "frame" as const,
+              timestamp: 0,
+              timestampLabel: "0:00",
+            }),
+            url: thumbnailUrl,
+            source:
+              asset?.thumbnail.source === "custom" ? "custom" : "frame",
+          },
+          processingSteps: {
+            uploadComplete: true,
+            previewGenerating: false,
+            previewReady: true,
+            watermarkApplying: false,
+            watermarkReady: true,
+            thumbnailExtracting: false,
+            thumbnailReady: true,
+          },
+        },
+        toast === undefined
+          ? "Customer preview generated (server FFmpeg)"
+          : toast,
+      );
+
+      patch((prev) => ({
+        ...prev,
+        products: prev.products.map((p) => {
+          if (p.mediaAssetId !== assetId) return p;
+          return {
+            ...p,
+            media: {
+              ...p.media,
+              previewVideo: previewUrl,
+              thumbnail: thumbnailUrl || p.media.thumbnail,
+            },
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      }));
+    },
+    [patch, updateMediaAsset],
+  );
+
+  /**
+   * Enqueue worker preview (async) and poll media_assets status.
+   * Used after durable master upload and by manual Generate Preview / Retry.
+   * Resolves when the job settles (succeeded / failed / aborted).
+   * Does not clear existing preview URLs on failure — last good preview remains.
+   */
+  const enqueueAndWatchVideoPreview = useCallback(
+    (options: {
+      assetId: string;
+      productId: string;
+      force?: boolean;
+      toastQueued?: string;
+      /** Suppress per-job toasts (batch refresh uses aggregate feedback). */
+      quiet?: boolean;
+      /** When set, abort/ignore apply if refresh generation no longer matches. */
+      expectedGeneration?: number;
+    }): Promise<"succeeded" | "failed" | "aborted"> => {
+      const {
+        assetId,
+        productId,
+        force = false,
+        quiet = false,
+        expectedGeneration,
+      } = options;
+      const asset = mediaAssetsRef.current.find((a) => a.id === assetId);
+      const failSteps = {
+        ...(asset?.processingSteps ?? {
+          uploadComplete: true,
+          previewGenerating: false,
+          previewReady: false,
+          watermarkApplying: false,
+          watermarkReady: false,
+          thumbnailExtracting: false,
+          thumbnailReady: false,
+        }),
+        uploadComplete: true,
+        previewGenerating: false,
+        previewReady: false,
+        watermarkApplying: false,
+        watermarkReady: false,
+        thumbnailExtracting: false,
+        thumbnailReady: false,
+      };
+
+      const generationStillCurrent = () =>
+        expectedGeneration === undefined ||
+        expectedGeneration === watermarkRefreshGenRef.current;
+
+      previewPollAbortRef.current.get(assetId)?.abort();
+      const controller = new AbortController();
+      previewPollAbortRef.current.set(assetId, controller);
+
+      updateMediaAsset(
+        assetId,
+        {
+          processingStatus: "queued",
+          processingError: undefined,
+          processingSteps: {
+            ...(asset?.processingSteps ?? failSteps),
+            uploadComplete: true,
+            previewGenerating: true,
+            previewReady: false,
+            watermarkApplying: false,
+            watermarkReady: false,
+            thumbnailExtracting: false,
+            thumbnailReady: false,
+          },
+        },
+        null,
+      );
+      if (options.toastQueued) {
+        pushToast(options.toastQueued);
+      }
+
+      return (async () => {
+        try {
+          if (!generationStillCurrent()) {
+            controller.abort();
+            return "aborted";
+          }
+
+          const settings = mediaSettingsRef.current;
+          const live =
+            mediaAssetsRef.current.find((a) => a.id === assetId) ?? asset;
+          const watermark =
+            live?.watermarkMode === "custom" && live.watermarkConfig
+              ? {
+                  ...settings.watermark,
+                  ...live.watermarkConfig,
+                  enabled:
+                    live.watermarkConfig.enabled ?? settings.watermark.enabled,
+                }
+              : settings.watermark;
+
+          const enqueued = await enqueueMediaProcess({
+            mediaAssetId: assetId,
+            productId,
+            force,
+            watermark,
+          });
+
+          if (!generationStillCurrent() || controller.signal.aborted) {
+            return "aborted";
+          }
+
+          if (!enqueued.ok) {
+            updateMediaAsset(
+              assetId,
+              {
+                processingStatus: "failed",
+                processingError: enqueued.error,
+                processingSteps: failSteps,
+              },
+              null,
+            );
+            if (!quiet) pushToast(enqueued.error, "error");
+            return "failed";
+          }
+
+          if (
+            enqueued.status === "ready" &&
+            enqueued.previewUrl &&
+            enqueued.thumbnailUrl
+          ) {
+            if (!generationStillCurrent()) return "aborted";
+            applyReadyPreview(
+              assetId,
+              enqueued.previewUrl,
+              enqueued.thumbnailUrl,
+              quiet
+                ? null
+                : enqueued.skipped
+                  ? "Preview already ready"
+                  : "Customer preview generated (server FFmpeg)",
+            );
+            return "succeeded";
+          }
+
+          updateMediaAsset(
+            assetId,
+            { processingStatus: "processing" },
+            null,
+          );
+
+          const waited = await waitForMediaProcessReady({
+            mediaAssetId: assetId,
+            signal: controller.signal,
+            onTick: (status) => {
+              if (status === "processing" || status === "queued") {
+                updateMediaAsset(
+                  assetId,
+                  { processingStatus: status as "processing" | "queued" },
+                  null,
+                );
+              }
+            },
+          });
+
+          if (!generationStillCurrent() || controller.signal.aborted) {
+            return "aborted";
+          }
+
+          if (!waited.ok) {
+            updateMediaAsset(
+              assetId,
+              {
+                processingStatus: "failed",
+                processingError: waited.error,
+                processingSteps: failSteps,
+              },
+              null,
+            );
+            if (!quiet) pushToast(waited.error, "error");
+            return "failed";
+          }
+
+          applyReadyPreview(
+            assetId,
+            waited.previewUrl,
+            waited.thumbnailUrl,
+            quiet ? null : "Customer preview generated (server FFmpeg)",
+          );
+          return "succeeded";
+        } catch (err) {
+          if (controller.signal.aborted || !generationStillCurrent()) {
+            return "aborted";
+          }
+          const message =
+            err instanceof Error ? err.message : "Preview processing failed";
+          updateMediaAsset(
+            assetId,
+            {
+              processingStatus: "failed",
+              processingError: message,
+              processingSteps: failSteps,
+            },
+            null,
+          );
+          if (!quiet) pushToast(message, "error");
+          return "failed";
+        } finally {
+          if (previewPollAbortRef.current.get(assetId) === controller) {
+            previewPollAbortRef.current.delete(assetId);
+          }
+        }
+      })();
+    },
+    [applyReadyPreview, pushToast, updateMediaAsset],
+  );
+
+  const publishWatermarkRefreshProgress = useCallback(
+    (generation: number, done: boolean) => {
+      const counts = watermarkRefreshCountsRef.current;
+      const running = watermarkRefreshInFlightRef.current;
+      const pending = watermarkRefreshQueueRef.current.length;
+      setWatermarkRefreshProgress({
+        generation,
+        total: counts.total,
+        pending,
+        running,
+        succeeded: counts.succeeded,
+        failed: counts.failed,
+        done,
+      });
+    },
+    [],
+  );
+
+  const pumpWatermarkRefresh = useCallback(
+    (generation: number) => {
+      if (generation !== watermarkRefreshGenRef.current) return;
+
+      const pump = () => {
+        if (generation !== watermarkRefreshGenRef.current) return;
+
+        while (
+          watermarkRefreshInFlightRef.current <
+            WATERMARK_REFRESH_MAX_IN_FLIGHT &&
+          watermarkRefreshQueueRef.current.length > 0
+        ) {
+          const assetId = watermarkRefreshQueueRef.current.shift()!;
+          if (watermarkRefreshActiveIdsRef.current.has(assetId)) {
+            continue;
+          }
+
+          const asset = mediaAssetsRef.current.find((a) => a.id === assetId);
+          if (!asset) {
+            watermarkRefreshCountsRef.current.failed += 1;
+            continue;
+          }
+
+          const productId =
+            asset.usedByProductIds?.[0]?.trim() ||
+            productIdFromDurableMasterRef(asset.master.url) ||
+            LIBRARY_MEDIA_PRODUCT_ID;
+
+          watermarkRefreshActiveIdsRef.current.add(assetId);
+          watermarkRefreshInFlightRef.current += 1;
+          publishWatermarkRefreshProgress(generation, false);
+
+          void enqueueAndWatchVideoPreview({
+            assetId,
+            productId,
+            force: true,
+            quiet: true,
+            expectedGeneration: generation,
+          }).then((result) => {
+            if (generation !== watermarkRefreshGenRef.current) {
+              return;
+            }
+
+            watermarkRefreshActiveIdsRef.current.delete(assetId);
+            watermarkRefreshInFlightRef.current = Math.max(
+              0,
+              watermarkRefreshInFlightRef.current - 1,
+            );
+
+            if (result === "succeeded") {
+              watermarkRefreshCountsRef.current.succeeded += 1;
+            } else if (result === "failed") {
+              watermarkRefreshCountsRef.current.failed += 1;
+            } else {
+              // Aborted because a newer Save superseded this generation —
+              // the new batch already re-queued unfinished assets.
+            }
+
+            const idle =
+              watermarkRefreshInFlightRef.current === 0 &&
+              watermarkRefreshQueueRef.current.length === 0;
+
+            if (idle) {
+              publishWatermarkRefreshProgress(generation, true);
+              const { succeeded, failed, total } =
+                watermarkRefreshCountsRef.current;
+              if (total === 0) {
+                setWatermarkRefreshProgress(null);
+              } else if (failed === 0) {
+                pushToast(
+                  `Preview refresh complete — ${succeeded} updated`,
+                  "success",
+                );
+              } else {
+                pushToast(
+                  `Preview refresh finished — ${succeeded} updated, ${failed} failed (previous previews kept)`,
+                  "error",
+                );
+              }
+            } else {
+              publishWatermarkRefreshProgress(generation, false);
+              pump();
+            }
+          });
+        }
+
+        publishWatermarkRefreshProgress(
+          generation,
+          watermarkRefreshInFlightRef.current === 0 &&
+            watermarkRefreshQueueRef.current.length === 0,
+        );
+      };
+
+      pump();
+    },
+    [enqueueAndWatchVideoPreview, publishWatermarkRefreshProgress, pushToast],
+  );
+
+  const refreshEligibleWatermarkPreviews = useCallback(
+    (opts: { wmChanged: boolean; qualityChanged: boolean }) => {
+      beginWatermarkRefreshRef.current?.(opts);
+    },
+    [],
+  );
+
+  // Bounded refresh runner (invoked only via refreshEligibleWatermarkPreviews).
+  beginWatermarkRefreshRef.current = (opts) => {
+    const eligible = listEligibleVideoAssetsForWatermarkRefresh(
+      mediaAssetsRef.current,
+      opts,
+    );
+
+    // Supersede any in-flight batch; unfinished assets are re-queued below.
+    for (const id of watermarkRefreshActiveIdsRef.current) {
+      previewPollAbortRef.current.get(id)?.abort();
+    }
+    watermarkRefreshActiveIdsRef.current.clear();
+    watermarkRefreshInFlightRef.current = 0;
+
+    const generation = ++watermarkRefreshGenRef.current;
+    const ids = eligible.map((a) => a.id);
+    // Deduplicate while preserving order.
+    const seen = new Set<string>();
+    const uniqueIds = ids.filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+
+    watermarkRefreshQueueRef.current = uniqueIds;
+    watermarkRefreshCountsRef.current = {
+      succeeded: 0,
+      failed: 0,
+      total: uniqueIds.length,
+    };
+
+    if (uniqueIds.length === 0) {
+      setWatermarkRefreshProgress(null);
+      pushToast("No eligible video previews to refresh", "info");
+      return;
+    }
+
+    pushToast(
+      `Refreshing ${uniqueIds.length} video preview${uniqueIds.length === 1 ? "" : "s"} (max ${WATERMARK_REFRESH_MAX_IN_FLIGHT} at a time)…`,
+      "info",
+    );
+    publishWatermarkRefreshProgress(generation, false);
+    pumpWatermarkRefresh(generation);
+  };
+
   const regenerateMediaPreview = useCallback(
     (assetId: string, productIdHint?: string) => {
       const asset = mediaAssetsRef.current.find((a) => a.id === assetId);
@@ -807,158 +1330,48 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Process API resolves Storage via productId (+ optional DB row).
+      // Library uploads live under media-masters/library/{id}/… — always send a hint.
       const productId =
         productIdHint?.trim() ||
         asset.usedByProductIds?.[0]?.trim() ||
-        undefined;
+        productIdFromDurableMasterRef(asset.master.url) ||
+        LIBRARY_MEDIA_PRODUCT_ID;
 
-      updateMediaAsset(
+      enqueueAndWatchVideoPreview({
         assetId,
-        {
-          processingStatus: "queued",
-          processingError: undefined,
-          processingSteps: {
-            ...asset.processingSteps,
-            uploadComplete: true,
-            previewGenerating: true,
-            previewReady: false,
-            watermarkApplying: true,
-            watermarkReady: false,
-            thumbnailExtracting: true,
-            thumbnailReady: false,
-          },
-        },
-        null,
-      );
-      pushToast("Queuing server preview generation…");
-
-      void (async () => {
-        updateMediaAsset(
-          assetId,
-          { processingStatus: "processing" },
-          null,
-        );
-        try {
-          const res = await fetch("/api/admin/media/process", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify({
-              mediaAssetId: assetId,
-              ...(productId ? { productId } : {}),
-              force: true,
-            }),
-          });
-          const data = (await res.json().catch(() => null)) as {
-            ok?: boolean;
-            status?: string;
-            error?: string;
-            message?: string;
-            previewUrl?: string;
-            thumbnailUrl?: string;
-            skipped?: boolean;
-          } | null;
-
-          if (!res.ok || !data?.ok) {
-            const err =
-              data?.error ||
-              data?.message ||
-              `Preview processing failed (${res.status})`;
-            updateMediaAsset(
-              assetId,
-              {
-                processingStatus: "failed",
-                processingError: err,
-                processingSteps: {
-                  ...asset.processingSteps,
-                  previewGenerating: false,
-                  previewReady: false,
-                  watermarkApplying: false,
-                  watermarkReady: false,
-                  thumbnailExtracting: false,
-                  thumbnailReady: false,
-                },
-              },
-              null,
-            );
-            pushToast(err, "error");
-            return;
-          }
-
-          if (data.status === "processing") {
-            pushToast("Preview already processing");
-            return;
-          }
-
-          const previewUrl = data.previewUrl?.trim() || "";
-          const thumbnailUrl = data.thumbnailUrl?.trim() || "";
-          updateMediaAsset(
-            assetId,
-            {
-              processingStatus: "ready",
-              processingError: undefined,
-              previewPlayback: "generated",
-              previewStale: false,
-              preview: {
-                ...asset.preview,
-                url: previewUrl || asset.preview.url,
-                status: "ready",
-                quality: asset.previewQuality ?? asset.preview.quality,
-                watermarkApplied: true,
-                access: "public",
-                resolution: "<=540x960",
-              },
-              thumbnail: {
-                ...asset.thumbnail,
-                url: thumbnailUrl || asset.thumbnail.url,
-                source:
-                  asset.thumbnail.source === "custom" ? "custom" : "frame",
-              },
-              processingSteps: {
-                uploadComplete: true,
-                previewGenerating: false,
-                previewReady: true,
-                watermarkApplying: false,
-                watermarkReady: true,
-                thumbnailExtracting: false,
-                thumbnailReady: true,
-              },
-            },
-            data.skipped
-              ? "Preview already ready"
-              : "Customer preview generated (server FFmpeg)",
-          );
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Preview processing failed";
-          updateMediaAsset(
-            assetId,
-            {
-              processingStatus: "failed",
-              processingError: message,
-            },
-            null,
-          );
-          pushToast(message, "error");
-        }
-      })();
+        productId,
+        force: true,
+        toastQueued: "Queuing server preview generation…",
+      });
     },
-    [pushToast, startProcessingJob, updateMediaAsset],
+    [enqueueAndWatchVideoPreview, pushToast, startProcessingJob],
   );
 
-  // Phase 0 / Phase 2 / Phase 5A: do NOT auto-start preview encode after
-  // hydrate/refresh OR after new video upload / master replace.
-  // Pending masters (hasLocalBlob / original-fallback) stay restored only.
-  // Production video preview runs ONLY via POST /api/admin/media/process
-  // from regenerateMediaPreview (explicit Admin action) → dedicated worker.
-  // Browser encodeCustomerPreview / startProcessingJob stay disconnected
-  // from production video upload (images may still use local derivatives).
+  // Production video preview: auto after durable master upload / replace, or
+  // via regenerateMediaPreview. FFmpeg always runs on the dedicated worker.
 
   const uploadMasterVideos = useCallback(
-    async (files: File[]): Promise<string[]> => {
+    async (
+      files: File[],
+      options?: {
+        productId?: string;
+        onProgress?: (fileIndex: number, pct: number) => void;
+        abortSignals?: Array<AbortSignal | undefined>;
+      },
+    ): Promise<string[]> => {
       const ids: string[] = [];
+      let durableCount = 0;
+      const storageProductId =
+        options?.productId?.trim() || LIBRARY_MEDIA_PRODUCT_ID;
 
-      for (const file of files) {
+      for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
+        const file = files[fileIndex]!;
+        const abortSignal = options?.abortSignals?.[fileIndex];
+        if (abortSignal?.aborted) {
+          continue;
+        }
+
         const id = uid("media");
         const stamp = new Date().toISOString();
         const baseName = file.name.replace(/\.[^.]+$/, "") || "Untitled video";
@@ -1010,7 +1423,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         ids.push(id);
 
         try {
-          // Durable original in IndexedDB; object URL is session-only
+          // IndexedDB = temporary cache/recovery; durable source of truth is Storage.
           const objectUrl = await persistOriginalUpload(id, file, file.name);
           const meta = await probeVideoFile(file).catch(() => null);
           const durationSeconds =
@@ -1021,48 +1434,134 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             meta?.width && meta?.height
               ? `${meta.width}x${meta.height}`
               : "1080x1920";
-          const readyForProcess: MediaAsset = {
-            ...placeholder,
-            master: {
-              ...placeholder.master,
-              url: objectUrl,
-              sizeBytes: file.size,
-              sizeLabel: formatSizeBytes(file.size),
-              duration: formatDuration(durationSeconds),
-              durationSeconds,
-              resolution,
-            },
-            preview: {
-              ...placeholder.preview,
-              url: "",
-              status: "uploaded",
-              resolution: "",
-              watermarkApplied: false,
-            },
-            thumbnail: {
-              ...placeholder.thumbnail,
-              url: "",
-            },
-            processingStatus: "uploaded",
-            processingSteps: {
-              ...EMPTY_PROCESSING_STEPS,
-              uploadComplete: true,
-            },
-            hasLocalBlob: true,
-            // Master is admin-only until a real derivative exists
-            previewPlayback: "none",
-            updatedAt: new Date().toISOString(),
-          };
 
-          patch((prev) => ({
-            ...prev,
-            mediaAssets: prev.mediaAssets.map((a) =>
-              a.id === id ? readyForProcess : a,
-            ),
-          }));
+          updateMediaAsset(
+            id,
+            {
+              master: {
+                ...placeholder.master,
+                url: objectUrl,
+                sizeBytes: file.size,
+                sizeLabel: formatSizeBytes(file.size),
+                duration: formatDuration(durationSeconds),
+                durationSeconds,
+                resolution,
+              },
+              processingStatus: "uploading",
+              processingSteps: {
+                ...EMPTY_PROCESSING_STEPS,
+              },
+              hasLocalBlob: true,
+              previewPlayback: "none",
+            },
+            null,
+          );
 
-          // Phase 2: do NOT auto-start full-duration browser encode on upload.
-          // Master is persisted; preview stays none until explicit regenerate.
+          if (abortSignal?.aborted) {
+            updateMediaAsset(
+              id,
+              {
+                processingStatus: "failed",
+                processingError: "Upload cancelled",
+                preview: { ...placeholder.preview, status: "failed" },
+                previewPlayback: "none",
+              },
+              null,
+            );
+            continue;
+          }
+
+          // Phase 5B: direct TUS → private media-masters (no Vercel byte proxy).
+          const uploaded = await uploadVideoDirect({
+            productId: storageProductId,
+            mediaAssetId: id,
+            kind: "master",
+            blob: file,
+            fileName: file.name,
+            abortSignal,
+            onProgress: (pct) => options?.onProgress?.(fileIndex, pct),
+          });
+
+          if (!uploaded.ok) {
+            updateMediaAsset(
+              id,
+              {
+                // Keep local blob URL for recovery; do not claim durable Storage.
+                master: {
+                  ...placeholder.master,
+                  url: objectUrl,
+                  sizeBytes: file.size,
+                  sizeLabel: formatSizeBytes(file.size),
+                  duration: formatDuration(durationSeconds),
+                  durationSeconds,
+                  resolution,
+                },
+                processingStatus: "failed",
+                processingError: uploaded.error,
+                preview: { ...placeholder.preview, status: "failed" },
+                previewPlayback: "none",
+                hasLocalBlob: true,
+              },
+              null,
+            );
+            pushToast(
+              uploaded.status === 499
+                ? `Upload cancelled: ${file.name}`
+                : `Failed to upload ${file.name}: ${uploaded.error}`,
+              "error",
+            );
+            continue;
+          }
+
+          updateMediaAsset(
+            id,
+            {
+              master: {
+                ...placeholder.master,
+                // Durable Storage ref (media-masters/…) — Publish skips re-upload.
+                url: uploaded.url,
+                fileName: file.name,
+                sizeBytes: file.size,
+                sizeLabel: formatSizeBytes(file.size),
+                duration: formatDuration(durationSeconds),
+                durationSeconds,
+                resolution,
+                access: "protected",
+              },
+              preview: {
+                ...placeholder.preview,
+                url: "",
+                status: "uploaded",
+                resolution: "",
+                watermarkApplied: false,
+              },
+              thumbnail: {
+                ...placeholder.thumbnail,
+                url: "",
+              },
+              processingStatus: "uploaded",
+              processingError: undefined,
+              processingSteps: {
+                ...EMPTY_PROCESSING_STEPS,
+                uploadComplete: true,
+              },
+              hasLocalBlob: true,
+              previewPlayback: "none",
+            },
+            null,
+          );
+          durableCount += 1;
+
+          // Auto-enqueue dedicated-worker preview after durable master is confirmed.
+          enqueueAndWatchVideoPreview({
+            assetId: id,
+            productId: storageProductId,
+            force: false,
+            toastQueued:
+              durableCount === 1
+                ? "Master uploaded — generating customer preview…"
+                : undefined,
+          });
         } catch {
           updateMediaAsset(
             id,
@@ -1078,17 +1577,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      if (ids.length) {
-        pushToast(
-          ids.length === 1
-            ? "Video uploaded — master ready"
-            : `${ids.length} videos uploaded — masters ready`,
-        );
-      }
-
       return ids;
     },
     [
+      enqueueAndWatchVideoPreview,
       patch,
       pushToast,
       state.mediaSettings.defaultPreviewQuality,
@@ -1145,12 +1637,25 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   );
 
   const replaceMasterVideo = useCallback(
-    async (assetId: string, file: File) => {
+    async (
+      assetId: string,
+      file: File,
+      options?: {
+        productId?: string;
+        onProgress?: (pct: number) => void;
+        abortSignal?: AbortSignal;
+      },
+    ) => {
       const existing = state.mediaAssets.find((a) => a.id === assetId);
       if (!existing) {
         pushToast("Media asset not found", "error");
         return;
       }
+
+      const storageProductId =
+        options?.productId?.trim() ||
+        existing.usedByProductIds?.[0]?.trim() ||
+        LIBRARY_MEDIA_PRODUCT_ID;
 
       try {
         const objectUrl = await persistOriginalUpload(assetId, file, file.name);
@@ -1164,13 +1669,109 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             ? `${meta.width}x${meta.height}`
             : existing.master.resolution || "1080x1920";
 
+        updateMediaAsset(
+          assetId,
+          {
+            originalFileName: file.name,
+            master: {
+              ...existing.master,
+              url: objectUrl,
+              fileName: file.name,
+              sizeBytes: file.size,
+              sizeLabel: formatSizeBytes(file.size),
+              duration: formatDuration(durationSeconds),
+              durationSeconds,
+              resolution,
+              access: "protected",
+            },
+            preview: {
+              ...existing.preview,
+              url: "",
+              status: "uploading",
+              resolution: "",
+              sizeBytes: undefined,
+              sizeLabel: undefined,
+              watermarkApplied: false,
+            },
+            processingStatus: "uploading",
+            processingError: undefined,
+            processingSteps: {
+              ...EMPTY_PROCESSING_STEPS,
+            },
+            hasLocalBlob: true,
+            previewPlayback: "none",
+            previewStale: false,
+          },
+          null,
+        );
+
+        if (options?.abortSignal?.aborted) {
+          updateMediaAsset(
+            assetId,
+            {
+              processingStatus: "failed",
+              processingError: "Upload cancelled",
+              previewPlayback: "none",
+            },
+            null,
+          );
+          return;
+        }
+
+        const uploaded = await uploadVideoDirect({
+          productId: storageProductId,
+          mediaAssetId: assetId,
+          kind: "master",
+          blob: file,
+          fileName: file.name,
+          abortSignal: options?.abortSignal,
+          onProgress: options?.onProgress,
+        });
+
+        if (!uploaded.ok) {
+          updateMediaAsset(
+            assetId,
+            {
+              master: {
+                ...existing.master,
+                url: objectUrl,
+                fileName: file.name,
+                sizeBytes: file.size,
+                sizeLabel: formatSizeBytes(file.size),
+                duration: formatDuration(durationSeconds),
+                durationSeconds,
+                resolution,
+                access: "protected",
+              },
+              processingStatus: "failed",
+              processingError: uploaded.error,
+              preview: {
+                ...existing.preview,
+                url: "",
+                status: "failed",
+                watermarkApplied: false,
+              },
+              hasLocalBlob: true,
+              previewPlayback: "none",
+            },
+            null,
+          );
+          pushToast(
+            uploaded.status === 499
+              ? "Master upload cancelled"
+              : `Master upload failed: ${uploaded.error}`,
+            "error",
+          );
+          return;
+        }
+
         const readyForProcess: MediaAsset = {
           ...existing,
           name: existing.name || file.name.replace(/\.[^.]+$/, ""),
           originalFileName: file.name,
           master: {
             ...existing.master,
-            url: objectUrl,
+            url: uploaded.url,
             fileName: file.name,
             sizeBytes: file.size,
             sizeLabel: formatSizeBytes(file.size),
@@ -1211,8 +1812,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           return { ...prev, mediaAssets, products };
         });
 
-        // Phase 2: do NOT auto-encode after master replace — explicit regenerate only.
-        pushToast("Master replaced — regenerate preview when ready");
+        enqueueAndWatchVideoPreview({
+          assetId,
+          productId: storageProductId,
+          force: true,
+          toastQueued: "Master replaced — generating customer preview…",
+        });
       } catch {
         updateMediaAsset(
           assetId,
@@ -1227,6 +1832,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       }
     },
     [
+      enqueueAndWatchVideoPreview,
       patch,
       pushToast,
       state.mediaAssets,
@@ -2043,6 +2649,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       updateMediaAsset,
       deleteMediaAsset,
       setMediaSettings,
+      refreshEligibleWatermarkPreviews,
+      watermarkRefreshProgress,
       setImagePdpSettings,
       uploadMasterVideos,
       uploadMasterImages,
@@ -2090,6 +2698,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       updateMediaAsset,
       deleteMediaAsset,
       setMediaSettings,
+      refreshEligibleWatermarkPreviews,
+      watermarkRefreshProgress,
       setImagePdpSettings,
       uploadMasterVideos,
       uploadMasterImages,

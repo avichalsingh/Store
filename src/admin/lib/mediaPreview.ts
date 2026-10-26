@@ -24,6 +24,56 @@ export function isSeedPlaceholderVideo(url: string | undefined | null): boolean 
   return /\/media\/(videos|protected)\/.+\.mp4$/i.test(url);
 }
 
+/**
+ * True when a URL can be used as a browser <video>/<img> src.
+ * Rejects private Storage refs such as media-masters/.../master.mp4.
+ */
+export function isBrowserPlayableMediaUrl(
+  url: string | undefined | null,
+): boolean {
+  if (!url) return false;
+  if (url.startsWith("blob:") || url.startsWith("data:")) return true;
+  if (/^(https?:\/\/|\/)/i.test(url)) return true;
+  return false;
+}
+
+/** Durable private master Storage ref (not a browser URL). */
+export function isPrivateMasterStorageRef(
+  url: string | undefined | null,
+): boolean {
+  if (!url) return false;
+  return url.includes("media-masters/");
+}
+
+/**
+ * Public customer preview/thumbnail hosted in media-previews.
+ * Rejects private masters and non-HTTPS blob/session URLs.
+ */
+export function isPublicCustomerMediaUrl(
+  url: string | undefined | null,
+): boolean {
+  if (!url) return false;
+  const raw = url.trim();
+  if (!/^https?:\/\//i.test(raw)) return false;
+  if (raw.includes("media-masters/")) return false;
+  if (!raw.includes("media-previews/")) return false;
+  return true;
+}
+
+/**
+ * productId segment from durable master ref:
+ * media-masters/{productId}/{mediaAssetId}/master.ext
+ */
+export function productIdFromDurableMasterRef(
+  url: string | undefined | null,
+): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  const match = /^media-masters\/([^/]+)\//i.exec(trimmed);
+  const segment = match?.[1]?.trim();
+  return segment || undefined;
+}
+
 function stripEphemeralOrPlaceholder(url: string): string {
   if (url.startsWith("blob:")) return "";
   if (isSeedPlaceholderVideo(url)) return "";
@@ -33,11 +83,13 @@ function stripEphemeralOrPlaceholder(url: string): string {
 /**
  * MASTER / ORIGINAL only — never the watermarked customer preview.
  * Used by Admin Media Library and thumbnail frame capture.
+ * Never returns private media-masters Storage refs (not browser-playable).
  */
 export function getMasterVideoUrl(asset: MediaAsset): string {
   const url = asset.master.url;
-  if (isVideoUrl(url) && !isSeedPlaceholderVideo(url)) return url;
-  return "";
+  if (!isVideoUrl(url) || isSeedPlaceholderVideo(url)) return "";
+  if (!isBrowserPlayableMediaUrl(url)) return "";
+  return url;
 }
 
 /**
@@ -65,15 +117,15 @@ export function getCustomerPreviewUrl(asset: MediaAsset): string {
 }
 
 /**
- * True when a URL can render as an admin still (blob/data/http(s)/path).
- * Broader than isImageUrl — legacy CMS entries often lack file extensions.
+ * True when a URL can render in the browser as an admin still/media src.
+ * Accepts only real displayable references: blob:, data:, http(s):, root-relative /.
+ * Rejects private Storage refs such as media-masters/.../master.mp4.
  */
 export function isUsableAdminMediaUrl(url: string | undefined | null): boolean {
   if (!url) return false;
   if (url.startsWith("blob:") || url.startsWith("data:")) return true;
   if (isSeedPlaceholderVideo(url)) return false;
-  if (isImageUrl(url) || isVideoUrl(url)) return true;
-  // Absolute or root-relative paths / remote URLs without a clear extension
+  // Absolute remote or root-relative public paths only — never bare Storage refs.
   if (/^(https?:\/\/|\/)/i.test(url)) return true;
   return false;
 }

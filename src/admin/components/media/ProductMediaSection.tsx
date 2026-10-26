@@ -358,6 +358,7 @@ export function ProductMediaSection({
         </div>
         <UploadMediaModal
           open={uploadOpen}
+          productId={draft.id}
           onClose={() => setUploadOpen(false)}
           onUploaded={(ids) => {
             if (ids[0]) attach(ids[0]);
@@ -858,6 +859,7 @@ export function ProductMediaSection({
 
       <UploadMediaModal
         open={uploadOpen}
+        productId={draft.id}
         onClose={() => setUploadOpen(false)}
         onUploaded={(ids) => {
           if (ids[0]) attach(ids[0]);
@@ -866,11 +868,12 @@ export function ProductMediaSection({
       />
       <UploadMediaModal
         open={replaceUploadOpen}
+        productId={draft.id}
         replaceAssetId={asset.id}
         onClose={() => setReplaceUploadOpen(false)}
         onUploaded={() => {
           setReplaceUploadOpen(false);
-          pushToast("Master upload started — preview will generate automatically");
+          pushToast("Master uploaded — Generate Preview when ready");
         }}
       />
       <MediaLibraryPickerModal

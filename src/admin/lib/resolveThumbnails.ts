@@ -3,8 +3,11 @@ import type {
   AdminProduct,
   MediaAsset,
 } from "@/admin/types";
+import { normalizeMediaAssetType } from "@/admin/types";
 import {
+  getPosterUrl,
   isImageUrl,
+  isUsableAdminMediaUrl,
   resolveAdminMasterDisplayUrl,
 } from "@/admin/lib/mediaPreview";
 
@@ -17,12 +20,34 @@ function isUsableThumb(url: string | undefined | null): url is string {
   return isImageUrl(url);
 }
 
-/** Admin media visual — clean Master / poster (never watermarked Preview). */
+/** Admin media visual — clean still / poster (never watermarked Preview or private master). */
 export function resolveMediaThumbnail(asset: MediaAsset | undefined | null): string {
   if (!asset) return FALLBACK_THUMB;
+
+  const poster = getPosterUrl(asset);
+  if (poster && isUsableAdminMediaUrl(poster)) return poster;
+
+  if (
+    isUsableThumb(asset.thumbnail.url) &&
+    isUsableAdminMediaUrl(asset.thumbnail.url) &&
+    asset.thumbnail.url !== asset.preview.url
+  ) {
+    return asset.thumbnail.url;
+  }
+
   const fromMaster = resolveAdminMasterDisplayUrl(asset);
-  if (fromMaster) return fromMaster;
-  return FALLBACK_THUMB;
+  if (!fromMaster || !isUsableAdminMediaUrl(fromMaster)) return FALLBACK_THUMB;
+
+  // VIDEO: never use master (private Storage ref or video file) as an image thumb.
+  // IMAGE: master itself is the still (http(s), /, or blob:).
+  if (normalizeMediaAssetType(asset.type) === "video") {
+    if (isImageUrl(fromMaster) || fromMaster.startsWith("data:image")) {
+      return fromMaster;
+    }
+    return FALLBACK_THUMB;
+  }
+
+  return fromMaster;
 }
 
 /**

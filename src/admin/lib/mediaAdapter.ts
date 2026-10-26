@@ -1,4 +1,6 @@
 import type { AdminProductMedia, MediaAsset } from "@/admin/types";
+import { normalizeMediaAssetType } from "@/admin/types";
+import { isUsableAdminMediaUrl } from "@/admin/lib/mediaPreview";
 
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -46,12 +48,27 @@ export function formatSizeBytes(bytes: number): string {
 }
 
 export function assetToProductMedia(asset: MediaAsset): AdminProductMedia {
-  // Admin adapter: thumbnail stays clean (master / clean poster).
+  // Admin adapter: thumbnail stays clean (public/still URL only).
   // Storefront watermarked visuals come from asset.preview via mapAdminToStorefront.
-  const cleanThumb =
-    asset.thumbnail.url && asset.thumbnail.url !== asset.preview.url
+  // Never copy private media-masters/... Storage refs into product.media.thumbnail.
+  const type = normalizeMediaAssetType(asset.type);
+  const preferredThumb =
+    asset.thumbnail.url &&
+    asset.thumbnail.url !== asset.preview.url &&
+    isUsableAdminMediaUrl(asset.thumbnail.url)
       ? asset.thumbnail.url
-      : asset.master.url || asset.thumbnail.url || "";
+      : "";
+  // IMAGE: master may be the clean still when it is browser-displayable.
+  // VIDEO: never substitute master (private Storage ref or video file).
+  const masterAsThumb =
+    !preferredThumb &&
+    type === "image" &&
+    asset.master.url &&
+    asset.master.url !== asset.preview.url &&
+    isUsableAdminMediaUrl(asset.master.url)
+      ? asset.master.url
+      : "";
+  const cleanThumb = preferredThumb || masterAsThumb || "";
   return {
     thumbnail: cleanThumb,
     previewVideo: asset.preview.url || undefined,

@@ -225,3 +225,98 @@ export async function setMediaProcessingStatus(
     throw new Error(`Failed to update media_assets: ${error.message}`);
   }
 }
+
+const DEFAULT_PROCESS_STEPS = {
+  uploadComplete: true,
+  previewGenerating: true,
+  previewReady: false,
+  watermarkApplying: true,
+  watermarkReady: false,
+  thumbnailExtracting: true,
+  thumbnailReady: false,
+};
+
+/**
+ * Ensure a media_assets row exists with durable master refs so the worker can
+ * persist queued → processing → ready/failed. No schema change — upsert only.
+ */
+export async function ensureMediaAssetRowForProcessing(
+  supabase: SupabaseClient,
+  options: {
+    mediaAssetId: string;
+    master: ResolvedMaster;
+    existing: MediaAssetProcessRow | null;
+    usedByProductId?: string;
+  },
+): Promise<void> {
+  const { mediaAssetId, master, existing, usedByProductId } = options;
+  const now = new Date().toISOString();
+  const fileName = master.path.split("/").pop() || "master.mp4";
+  const usedBy =
+    usedByProductId && usedByProductId !== "library"
+      ? [usedByProductId]
+      : existing?.used_by_product_ids?.length
+        ? existing.used_by_product_ids
+        : [];
+
+  if (existing) {
+    const { error } = await supabase
+      .from("media_assets")
+      .update({
+        master_bucket: master.bucket,
+        master_path: master.path,
+        processing_status: "queued",
+        processing_error: null,
+        processing_steps: {
+          ...(existing.processing_steps &&
+          typeof existing.processing_steps === "object"
+            ? existing.processing_steps
+            : {}),
+          ...DEFAULT_PROCESS_STEPS,
+        },
+        updated_at: now,
+      })
+      .eq("id", mediaAssetId);
+    if (error) {
+      throw new Error(`Failed to queue media_assets for processing: ${error.message}`);
+    }
+    return;
+  }
+
+  const { error } = await supabase.from("media_assets").upsert(
+    {
+      id: mediaAssetId,
+      name: mediaAssetId,
+      original_file_name: fileName,
+      type: "video",
+      master_bucket: master.bucket,
+      master_path: master.path,
+      preview_bucket: "",
+      preview_path: null,
+      preview_url: null,
+      thumbnail_path: null,
+      thumbnail_url: null,
+      mime_type: "video/mp4",
+      size_bytes: null,
+      size_label: null,
+      resolution: "",
+      duration: "",
+      duration_seconds: 0,
+      processing_status: "queued",
+      processing_error: null,
+      processing_steps: DEFAULT_PROCESS_STEPS,
+      watermark_mode: "global",
+      watermark_config: null,
+      preview_quality: "optimized",
+      preview_playback: "none",
+      used_by_product_ids: usedBy,
+      created_at: now,
+      updated_at: now,
+    },
+    { onConflict: "id" },
+  );
+
+  if (error) {
+    throw new Error(`Failed to create media_assets for processing: ${error.message}`);
+  }
+}

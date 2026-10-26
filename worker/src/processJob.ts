@@ -9,10 +9,17 @@ import {
   createWorkerSupabase,
   deterministicOutputPaths,
   downloadMasterToFile,
+  downloadWatermarkLogoToFile,
   publicObjectsExist,
   updateMediaAssetRow,
   uploadPublicObject,
 } from "./supabase.js";
+import {
+  DEFAULT_WORKER_WATERMARK,
+  isAllowedWatermarkLogoPath,
+  sanitizeWorkerWatermark,
+  type WorkerWatermarkConfig,
+} from "./watermark.js";
 
 export type WorkerProcessPayload = {
   mediaAssetId: string;
@@ -20,6 +27,13 @@ export type WorkerProcessPayload = {
   masterBucket: string;
   masterPath: string;
   force?: boolean;
+  /**
+   * When true, the HTTP handler returns 202 immediately and runs FFmpeg in
+   * the background on this long-lived worker process (not serverless).
+   */
+  async?: boolean;
+  /** Raw/sanitized Admin watermark; always re-sanitized before encode. */
+  watermark?: WorkerWatermarkConfig | Record<string, unknown>;
 };
 
 export type WorkerProcessResult =
@@ -85,6 +99,26 @@ export async function processMediaJob(
   const masterBucket = payload.masterBucket.trim() || MEDIA_MASTERS_BUCKET;
   const masterPath = payload.masterPath.trim();
   const force = Boolean(payload.force);
+  const rawWm =
+    payload.watermark && typeof payload.watermark === "object"
+      ? (payload.watermark as Record<string, unknown>)
+      : null;
+  const rawLogo =
+    rawWm && typeof rawWm.logoPath === "string"
+      ? rawWm.logoPath.trim()
+      : rawWm && typeof rawWm.imageStoragePath === "string"
+        ? String(rawWm.imageStoragePath).trim()
+        : "";
+  if (rawLogo && !isAllowedWatermarkLogoPath(rawLogo)) {
+    return {
+      ok: false,
+      error:
+        "Invalid watermark logo path — only the trusted system logo object is allowed",
+    };
+  }
+  const watermark = sanitizeWorkerWatermark(
+    payload.watermark ?? DEFAULT_WORKER_WATERMARK,
+  );
 
   if (!mediaAssetId || !productId || !masterPath) {
     return {
@@ -158,15 +192,30 @@ export async function processMediaJob(
   const masterFile = join(workDir, "master.bin");
   const previewFile = join(workDir, "preview.mp4");
   const thumbFile = join(workDir, "thumb.jpg");
+  const logoFile = join(workDir, "watermark-logo.bin");
 
   try {
     await downloadMasterToFile(supabase, masterBucket, masterPath, masterFile);
 
-    const { resolution } = await generateCustomerPreview({
-      masterFile,
-      previewFile,
-      thumbFile,
-    });
+    let logoPathOnDisk: string | null = null;
+    if (watermark.enabled && watermark.logoPath) {
+      await downloadWatermarkLogoToFile(
+        supabase,
+        watermark.logoPath,
+        logoFile,
+      );
+      logoPathOnDisk = logoFile;
+    }
+
+    const { resolution } = await generateCustomerPreview(
+      {
+        masterFile,
+        previewFile,
+        thumbFile,
+      },
+      watermark,
+      logoPathOnDisk,
+    );
     await generateThumbnail({ masterFile, previewFile, thumbFile });
 
     if (!(await fileExists(previewFile)) || !(await fileExists(thumbFile))) {

@@ -400,13 +400,28 @@ export default function MediaLibraryPage() {
                   onManage={() => openAttach(asset.id)}
                   onDetach={(productId) => detachMediaFromProduct(productId)}
                 />
-                <div className="flex items-center justify-between pt-1">
-                  <Link href={`/admin/media/${asset.id}`}>
-                    <AdminButton variant="ghost" size="sm">
-                      <Eye className="h-3.5 w-3.5" />
-                      Details
-                    </AdminButton>
-                  </Link>
+                <div className="flex items-center justify-between gap-1 pt-1">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Link href={`/admin/media/${asset.id}`}>
+                      <AdminButton variant="ghost" size="sm">
+                        <Eye className="h-3.5 w-3.5" />
+                        Details
+                      </AdminButton>
+                    </Link>
+                    {asset.type === "video" &&
+                    (asset.processingStatus === "uploaded" ||
+                      asset.processingStatus === "failed") ? (
+                      <AdminButton
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => regenerateMediaPreview(asset.id)}
+                      >
+                        {asset.processingStatus === "failed"
+                          ? "Retry Preview"
+                          : "Generate Preview"}
+                      </AdminButton>
+                    ) : null}
+                  </div>
                   <div className="relative">
                     <AdminButton
                       variant="ghost"

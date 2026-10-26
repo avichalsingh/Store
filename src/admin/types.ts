@@ -140,8 +140,17 @@ export type WatermarkConfig = {
   opacity: number; // 0-100
   size: WatermarkSize;
   movement: WatermarkMovement;
-  imageUrl?: string; // PNG/WebP
+  /**
+   * CMS display URL only (blob: draft, or `/api/admin/media/watermark-logo` after save).
+   * Never sent to the worker as a fetch target.
+   */
+  imageUrl?: string;
   imageName?: string;
+  /**
+   * Trusted Storage object key after Save (e.g. system/watermark-logo.png).
+   * Worker downloads via service role from the fixed watermark-logo bucket.
+   */
+  imageStoragePath?: string;
 };
 
 export type MediaMasterFile = {

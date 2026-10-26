@@ -30,6 +30,13 @@ export type DurableMediaProgressEvent = {
 
 type UploadKind = "master" | "preview" | "thumbnail";
 
+/**
+ * Fixed Storage path namespace for Media Library uploads not attached to a product.
+ * Server builds media-masters/library/{mediaAssetId}/master.<ext>.
+ * Not a real CMS/catalog product id.
+ */
+export const LIBRARY_MEDIA_PRODUCT_ID = "library";
+
 type SignedUploadAuthResponse = {
   ok?: boolean;
   error?: string;
@@ -117,13 +124,31 @@ async function requestSignedUploadAuth(options: {
     !body.path ||
     !body.durableUrl
   ) {
-    const fallback =
-      response.status === 401
-        ? "Admin session expired or invalid. Sign out and sign in with the admin API password."
-        : "Failed to authorize direct Storage upload";
+    // Prefer an actionable message for auth failures (API often returns bare "Unauthorized").
+    if (response.status === 401) {
+      return {
+        ok: false,
+        error:
+          "Admin session expired or invalid. Sign out and sign in again to upload.",
+        status: 401,
+      };
+    }
+    if (response.status === 413) {
+      return {
+        ok: false,
+        error:
+          typeof body.error === "string"
+            ? body.error
+            : "File exceeds the Supabase Storage size limit. Raise the project global file size limit to at least 500 MB, then retry.",
+        status: 413,
+      };
+    }
     return {
       ok: false,
-      error: typeof body.error === "string" ? body.error : fallback,
+      error:
+        typeof body.error === "string"
+          ? body.error
+          : "Failed to authorize direct Storage upload",
       status: response.status,
     };
   }
@@ -158,8 +183,19 @@ function uploadBlobViaTus(options: {
     durableUrl: string;
   };
   onProgress?: (pct: number) => void;
+  abortSignal?: AbortSignal;
 }): Promise<{ ok: true; url: string } | { ok: false; error: string; status: number }> {
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (
+      result: { ok: true; url: string } | { ok: false; error: string; status: number },
+    ) => {
+      if (settled) return;
+      settled = true;
+      options.abortSignal?.removeEventListener("abort", onAbort);
+      resolve(result);
+    };
+
     const upload = new tus.Upload(options.blob, {
       endpoint: options.auth.resumableEndpoint,
       retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
@@ -178,7 +214,7 @@ function uploadBlobViaTus(options: {
         filename: options.fileName,
       },
       onError(error) {
-        resolve({
+        finish({
           ok: false,
           error:
             error instanceof Error
@@ -197,33 +233,63 @@ function uploadBlobViaTus(options: {
       },
       onSuccess() {
         options.onProgress?.(100);
-        resolve({ ok: true, url: options.auth.durableUrl });
+        finish({ ok: true, url: options.auth.durableUrl });
       },
     });
+
+    const onAbort = () => {
+      try {
+        void upload.abort(true);
+      } catch {
+        /* ignore */
+      }
+      finish({
+        ok: false,
+        error: "Upload cancelled",
+        status: 499,
+      });
+    };
+
+    if (options.abortSignal?.aborted) {
+      onAbort();
+      return;
+    }
+    options.abortSignal?.addEventListener("abort", onAbort);
 
     upload
       .findPreviousUploads()
       .then((previousUploads) => {
+        if (settled) return;
         if (previousUploads.length > 0) {
           upload.resumeFromPreviousUpload(previousUploads[0]);
         }
         upload.start();
       })
       .catch(() => {
+        if (settled) return;
         // Fingerprint lookup failed — start a fresh upload.
         upload.start();
       });
   });
 }
 
-async function uploadVideoDirect(options: {
+/**
+ * Authorize + direct TUS upload for master/preview video.
+ * Server builds the Storage path; browser never receives the service-role key.
+ */
+export async function uploadVideoDirect(options: {
   productId: string;
   mediaAssetId: string;
   kind: "master" | "preview";
   blob: Blob;
   fileName: string;
   onProgress?: (pct: number) => void;
+  abortSignal?: AbortSignal;
 }): Promise<{ ok: true; url: string } | { ok: false; error: string; status: number }> {
+  if (options.abortSignal?.aborted) {
+    return { ok: false, error: "Upload cancelled", status: 499 };
+  }
+
   const contentType =
     options.blob.type ||
     (options.kind === "preview" ? "video/mp4" : "video/mp4");
@@ -238,11 +304,16 @@ async function uploadVideoDirect(options: {
   });
   if (!authorized.ok) return authorized;
 
+  if (options.abortSignal?.aborted) {
+    return { ok: false, error: "Upload cancelled", status: 499 };
+  }
+
   return uploadBlobViaTus({
     blob: options.blob,
     fileName: options.fileName,
     auth: authorized.auth,
     onProgress: options.onProgress,
+    abortSignal: options.abortSignal,
   });
 }
 

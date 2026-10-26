@@ -1,5 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { CUSTOMER_PREVIEW_MAX_SECONDS } from "./supabase.js";
+import {
+  DEFAULT_WORKER_WATERMARK,
+  buildDiagonalTextFilterComplex,
+  buildLogoFilterComplex,
+  buildTextWatermarkFilters,
+  needsDiagonalTextRotatePath,
+  type WorkerWatermarkConfig,
+} from "./watermark.js";
 
 /**
  * Customer preview profile (Phase 5A):
@@ -8,8 +16,8 @@ import { CUSTOMER_PREVIEW_MAX_SECONDS } from "./supabase.js";
  * - ~540×960 (preserve aspect, even dims)
  * - ~24 fps
  * - ~0.85 Mbps video
- * - baked-in RHYTHM watermark
- * - no audio (storefront silent loop)
+ * - AAC audio when the master has an audio stream (no `-an`)
+ * - baked-in watermark from Admin Media & Watermark settings (text or logo)
  */
 
 export type FfmpegPaths = {
@@ -71,7 +79,6 @@ function runFfmpeg(args: string[]): Promise<void> {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutTimer);
-      // On timeout, keep killTimer so SIGKILL still fires.
       if (!timedOut && killTimer) clearTimeout(killTimer);
       reject(err);
     };
@@ -135,20 +142,48 @@ const SCALE_FILTER =
   "scale='min(540,iw)':'min(960,ih)':force_original_aspect_ratio=decrease," +
   "scale=trunc(iw/2)*2:trunc(ih/2)*2";
 
-function watermarkFilter(): string {
-  const font = process.env.WORKER_WATERMARK_FONT?.trim();
-  const fontClause = font ? `fontfile=${font}:` : "";
-  return (
-    `drawtext=${fontClause}text='RHYTHM':fontsize=h*0.045:fontcolor=white@0.38:` +
-    "x=(w-text_w)/2:y=(h-text_h)/2:" +
-    "box=1:boxcolor=black@0.15:boxborderw=8"
-  );
+const ENCODE_ARGS = [
+  "-r",
+  "24",
+  "-c:v",
+  "libx264",
+  "-profile:v",
+  "main",
+  "-level",
+  "4.0",
+  "-pix_fmt",
+  "yuv420p",
+  "-b:v",
+  "850k",
+  "-maxrate",
+  "900k",
+  "-bufsize",
+  "1700k",
+  "-c:a",
+  "aac",
+  "-b:a",
+  "128k",
+  "-ac",
+  "2",
+  "-ar",
+  "44100",
+  "-movflags",
+  "+faststart",
+] as const;
+
+function buildVideoFilter(watermark: WorkerWatermarkConfig): string {
+  const wm = buildTextWatermarkFilters(watermark);
+  return wm ? `${SCALE_FILTER},${wm}` : SCALE_FILTER;
 }
 
-export async function generateCustomerPreview(
+async function encodeTextOrPlain(
   paths: FfmpegPaths,
-): Promise<{ resolution: string }> {
-  const vf = `${SCALE_FILTER},${watermarkFilter()}`;
+  watermark: WorkerWatermarkConfig,
+): Promise<void> {
+  const vf = buildVideoFilter(watermark);
+  // Default stream selection (no explicit -map): video + audio when present.
+  // Do not use -an — that stripped customer audio. AAC is widely playable.
+  // Masters without audio still encode successfully (video-only output).
   await runFfmpeg([
     "-i",
     paths.masterFile,
@@ -156,27 +191,79 @@ export async function generateCustomerPreview(
     String(CUSTOMER_PREVIEW_MAX_SECONDS),
     "-vf",
     vf,
-    "-r",
-    "24",
-    "-c:v",
-    "libx264",
-    "-profile:v",
-    "main",
-    "-level",
-    "4.0",
-    "-pix_fmt",
-    "yuv420p",
-    "-b:v",
-    "850k",
-    "-maxrate",
-    "900k",
-    "-bufsize",
-    "1700k",
-    "-an",
-    "-movflags",
-    "+faststart",
+    ...ENCODE_ARGS,
     paths.previewFile,
   ]);
+}
+
+/**
+ * Diagonal text: upright sparse grid on transparent canvas → rotate → overlay.
+ * Uses filter_complex + optional audio map (same contract as logo encode).
+ */
+async function encodeDiagonalText(
+  paths: FfmpegPaths,
+  watermark: WorkerWatermarkConfig,
+): Promise<void> {
+  const filterComplex = buildDiagonalTextFilterComplex(watermark);
+  await runFfmpeg([
+    "-i",
+    paths.masterFile,
+    "-t",
+    String(CUSTOMER_PREVIEW_MAX_SECONDS),
+    "-filter_complex",
+    filterComplex,
+    "-map",
+    "[vout]",
+    "-map",
+    "0:a?",
+    ...ENCODE_ARGS,
+    paths.previewFile,
+  ]);
+}
+
+async function encodeWithLogo(
+  paths: FfmpegPaths,
+  watermark: WorkerWatermarkConfig,
+  logoFile: string,
+): Promise<void> {
+  const filterComplex = buildLogoFilterComplex(watermark);
+  // Explicit maps: filtered video + optional master audio (silent masters OK).
+  // Never use -an.
+  await runFfmpeg([
+    "-i",
+    paths.masterFile,
+    "-i",
+    logoFile,
+    "-t",
+    String(CUSTOMER_PREVIEW_MAX_SECONDS),
+    "-filter_complex",
+    filterComplex,
+    "-map",
+    "[vout]",
+    "-map",
+    "0:a?",
+    ...ENCODE_ARGS,
+    paths.previewFile,
+  ]);
+}
+
+export async function generateCustomerPreview(
+  paths: FfmpegPaths,
+  watermark: WorkerWatermarkConfig = DEFAULT_WORKER_WATERMARK,
+  logoFile?: string | null,
+): Promise<{ resolution: string }> {
+  if (watermark.enabled && watermark.logoPath) {
+    if (!logoFile) {
+      throw new Error(
+        "Watermark logo is configured but was not available for encoding",
+      );
+    }
+    await encodeWithLogo(paths, watermark, logoFile);
+  } else if (needsDiagonalTextRotatePath(watermark)) {
+    await encodeDiagonalText(paths, watermark);
+  } else {
+    await encodeTextOrPlain(paths, watermark);
+  }
   return { resolution: "<=540x960" };
 }
 

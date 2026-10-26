@@ -141,7 +141,18 @@ export function ProcessingStepsList({
 }) {
   const ready = status === "ready";
   const failed = status === "failed";
-  const items = buildSteps(steps, ready, kind);
+  // Only show a progress bar while a real job is queued/processing —
+  // "uploaded" means master is durable and waiting for explicit Generate Preview.
+  const jobInFlight = status === "processing" || status === "queued";
+  const items = buildSteps(steps, ready, kind).map((step) =>
+    jobInFlight
+      ? step
+      : {
+          ...step,
+          // Never spin preview/watermark/thumb steps when no job is running.
+          active: false,
+        },
+  );
   const activeLabel = items.find((i) => i.active && !i.done)?.label;
 
   return (
@@ -182,7 +193,7 @@ export function ProcessingStepsList({
           </li>
         ))}
       </ul>
-      {!ready && !failed ? (
+      {jobInFlight ? (
         <div className="space-y-1.5">
           {kind === "image" ? (
             <div className="h-1 overflow-hidden rounded-full bg-[var(--admin-surface-2)]">
@@ -208,6 +219,15 @@ export function ProcessingStepsList({
               : "Processing may take a few moments."}
           </p>
         </div>
+      ) : status === "uploaded" ? (
+        <p className="text-[11px] text-[var(--admin-muted)]">
+          Upload complete. Customer preview will generate automatically —
+          or use Generate Preview to retry.
+        </p>
+      ) : failed ? (
+        <p className="text-[11px] text-[var(--admin-danger)]">
+          Preview failed — retry Generate Preview.
+        </p>
       ) : null}
     </div>
   );

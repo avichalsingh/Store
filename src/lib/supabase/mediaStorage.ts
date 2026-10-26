@@ -8,6 +8,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const MEDIA_MASTERS_BUCKET = "media-masters";
 export const MEDIA_PREVIEWS_BUCKET = "media-previews";
 
+/** Product requirement: durable video masters up to 500 MB. */
+export const MEDIA_FILE_SIZE_LIMIT_BYTES = 524_288_000;
+
 export type MediaStorageKind = "master" | "preview" | "thumbnail";
 
 const BUCKET_FOR_KIND: Record<MediaStorageKind, string> = {
@@ -18,6 +21,9 @@ const BUCKET_FOR_KIND: Record<MediaStorageKind, string> = {
 
 /** Master is downloadable/admin; previews+thumbs are storefront-facing. */
 const PUBLIC_BUCKETS = new Set([MEDIA_PREVIEWS_BUCKET]);
+
+const GLOBAL_LIMIT_DASHBOARD_HINT =
+  "Raise the Supabase project global file size limit to at least 500 MB: Dashboard → Project Settings → Storage → Global file size limit (or Storage settings). Bucket limits cannot exceed the project global limit.";
 
 export function extensionForUpload(
   kind: MediaStorageKind,
@@ -67,23 +73,54 @@ export async function ensureMediaBuckets(
       // Fall through to create — getBucket may 404 when missing.
     }
     if (existing) {
-      if (Boolean(existing.public) !== isPublic) {
+      const needsPrivacy = Boolean(existing.public) !== isPublic;
+      const currentLimit =
+        typeof existing.file_size_limit === "number"
+          ? existing.file_size_limit
+          : null;
+      const needsSize =
+        currentLimit === null || currentLimit < MEDIA_FILE_SIZE_LIMIT_BYTES;
+
+      if (needsPrivacy || needsSize) {
         const { error: updateError } = await supabase.storage.updateBucket(
           bucket,
-          { public: isPublic },
+          {
+            public: isPublic,
+            fileSizeLimit: MEDIA_FILE_SIZE_LIMIT_BYTES,
+          },
         );
         if (updateError) {
-          return {
-            ok: false,
-            error: `Failed to update Storage bucket "${bucket}": ${updateError.message}`,
-          };
+          // Project global Storage cap often blocks a 500 MB bucket limit.
+          // Keep privacy correct; size is enforced later against the effective limit.
+          if (needsPrivacy) {
+            const { error: privacyError } = await supabase.storage.updateBucket(
+              bucket,
+              { public: isPublic },
+            );
+            if (privacyError) {
+              return {
+                ok: false,
+                error: `Failed to update Storage bucket "${bucket}": ${privacyError.message}`,
+              };
+            }
+          }
+          // Do not fail ensure for size alone — upload-url returns 413 with
+          // GLOBAL_LIMIT_DASHBOARD_HINT when a specific file exceeds the cap.
+          if (needsSize && /maximum allowed size|file size|limit/i.test(updateError.message)) {
+            // Leave existing limit in place until the project global limit is raised.
+          } else if (needsSize) {
+            return {
+              ok: false,
+              error: `Failed to update Storage bucket "${bucket}" size limit: ${updateError.message}. ${GLOBAL_LIMIT_DASHBOARD_HINT}`,
+            };
+          }
         }
       }
       continue;
     }
     const { error: createError } = await supabase.storage.createBucket(bucket, {
       public: isPublic,
-      fileSizeLimit: 524288000, // 500 MB
+      fileSizeLimit: MEDIA_FILE_SIZE_LIMIT_BYTES,
     });
     if (
       createError &&
@@ -91,11 +128,24 @@ export async function ensureMediaBuckets(
     ) {
       return {
         ok: false,
-        error: `Failed to create Storage bucket "${bucket}": ${createError.message}`,
+        error: `Failed to create Storage bucket "${bucket}": ${createError.message}. ${GLOBAL_LIMIT_DASHBOARD_HINT}`,
       };
     }
   }
   return { ok: true };
+}
+
+/**
+ * Effective per-bucket upload ceiling (bytes), or null if unset (inherits project default).
+ */
+export async function getMediaBucketFileSizeLimit(
+  supabase: SupabaseClient,
+  kind: MediaStorageKind,
+): Promise<number | null> {
+  const bucket = BUCKET_FOR_KIND[kind];
+  const { data, error } = await supabase.storage.getBucket(bucket);
+  if (error || !data) return null;
+  return typeof data.file_size_limit === "number" ? data.file_size_limit : null;
 }
 
 export type UploadedMediaObject = {

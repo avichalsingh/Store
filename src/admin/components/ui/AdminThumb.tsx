@@ -4,6 +4,13 @@ import { cn } from "@/lib/utils";
 import { Film } from "lucide-react";
 import Image from "next/image";
 
+/** Browser-displayable src only — never private Storage refs like media-masters/... */
+function isDisplayableThumbSrc(src: string): boolean {
+  if (src.startsWith("blob:") || src.startsWith("data:")) return true;
+  if (/^https?:\/\//i.test(src) || src.startsWith("/")) return true;
+  return false;
+}
+
 /**
  * Renders a resolved thumbnail URL (blob / data / http / empty).
  * Never invents a decorative fake image — empty shows a structural placeholder.
@@ -21,7 +28,7 @@ export function AdminThumb({
   sizes?: string;
   rounded?: string;
 }) {
-  if (!src) {
+  if (!src || !isDisplayableThumbSrc(src)) {
     return (
       <span
         className={cn(

@@ -5,6 +5,8 @@ import {
   getMasterUiStatus,
   getMasterVideoUrl,
   getPosterUrl,
+  isBrowserPlayableMediaUrl,
+  isPrivateMasterStorageRef,
   isSeedPlaceholderVideo,
 } from "@/admin/lib/mediaPreview";
 import { restoreObjectUrl } from "@/admin/services/mediaBlobStore";
@@ -96,11 +98,9 @@ export function MediaPreviewPlayer({
     }
 
     // ——— MASTER (default for Admin Media Library) ———
+    // Prefer local blob / browser-playable URLs only — never media-masters/ refs.
     const liveMaster = getMasterVideoUrl(asset);
-    if (
-      liveMaster?.startsWith("blob:") ||
-      (liveMaster && !isSeedPlaceholderVideo(liveMaster))
-    ) {
+    if (liveMaster && isBrowserPlayableMediaUrl(liveMaster)) {
       setSrc(liveMaster);
       setStatus("ready");
       return;
@@ -112,6 +112,14 @@ export function MediaPreviewPlayer({
       if (original) {
         setSrc(original);
         setStatus("ready");
+        return;
+      }
+      // Durable private master exists in Storage but local bytes are gone —
+      // do not attempt to play the private Storage path in the browser.
+      if (isPrivateMasterStorageRef(asset.master.url)) {
+        setSrc("");
+        setStatus("empty");
+        setErrorMsg(null);
         return;
       }
       setSrc("");
@@ -212,6 +220,8 @@ export function MediaPreviewPlayer({
   }
 
   if (status === "empty" || (!src && status !== "failed")) {
+    const privateMasterUploaded =
+      playingMaster && isPrivateMasterStorageRef(asset.master.url);
     return (
       <div
         className={cn(
@@ -231,12 +241,18 @@ export function MediaPreviewPlayer({
         )}
         <div className="relative rounded-lg bg-black/55 px-2.5 py-1.5">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-white">
-            {playingMaster ? "No master video" : "No customer preview"}
+            {playingMaster
+              ? privateMasterUploaded
+                ? "Original uploaded"
+                : "No master video"
+              : "No customer preview"}
           </p>
           <p className="mt-0.5 text-[10px] text-white/80">
             {playingMaster
-              ? "Upload a master video to enable playback"
-              : "Regenerate preview from the master"}
+              ? privateMasterUploaded
+                ? "Private master is in Storage — generate preview to view"
+                : "Upload a master video to enable playback"
+              : "Generate Preview from the master"}
           </p>
         </div>
       </div>

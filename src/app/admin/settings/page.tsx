@@ -9,8 +9,10 @@ import {
   AdminSelect,
   AdminToggle,
 } from "@/admin/components/ui/AdminField";
+import { AdminConfirmDialog } from "@/admin/components/ui/AdminModal";
 import { AdminPageHeader } from "@/admin/components/ui/AdminPageHeader";
 import { AdminTabs } from "@/admin/components/ui/AdminTabs";
+import { listEligibleVideoAssetsForWatermarkRefresh } from "@/admin/lib/watermarkPreviewRefresh";
 import { signOutAdmin } from "@/admin/lib/signOutAdmin";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import type {
@@ -27,7 +29,16 @@ type Tab = "general" | "admin" | "payments" | "storage" | "media" | "site";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { pushToast, resetStore, hydrated, mediaSettings, setMediaSettings } = useAdmin();
+  const {
+    pushToast,
+    resetStore,
+    hydrated,
+    mediaSettings,
+    mediaAssets,
+    setMediaSettings,
+    refreshEligibleWatermarkPreviews,
+    watermarkRefreshProgress,
+  } = useAdmin();
   const [tab, setTab] = useState<Tab>("general");
   const [storeName, setStoreName] = useState("RHYTHM");
   const [supportEmail, setSupportEmail] = useState("hello@rhythm.studio");
@@ -38,10 +49,101 @@ export default function SettingsPage() {
   const [cdn, setCdn] = useState("Cloudflare R2");
   const [maintenance, setMaintenance] = useState(false);
   const [mediaDraft, setMediaDraft] = useState<GlobalMediaSettings | null>(null);
+  const [mediaSaving, setMediaSaving] = useState(false);
+  const [refreshConfirm, setRefreshConfirm] = useState<{
+    open: boolean;
+    count: number;
+    wmChanged: boolean;
+    qualityChanged: boolean;
+  }>({ open: false, count: 0, wmChanged: false, qualityChanged: false });
 
   useEffect(() => {
     if (hydrated) setMediaDraft(structuredClone(mediaSettings));
   }, [hydrated, mediaSettings]);
+
+  const saveMediaSettings = async () => {
+    if (!mediaDraft) return;
+    setMediaSaving(true);
+    try {
+      const next = structuredClone(mediaDraft);
+      const wm = next.watermark;
+
+      if (wm.imageUrl?.startsWith("blob:")) {
+        const blobRes = await fetch(wm.imageUrl);
+        if (!blobRes.ok) {
+          pushToast("Could not read watermark logo file", "error");
+          return;
+        }
+        const blob = await blobRes.blob();
+        const fd = new FormData();
+        fd.append("file", blob, wm.imageName || "watermark.png");
+        const res = await fetch("/api/admin/media/watermark-logo", {
+          method: "POST",
+          credentials: "same-origin",
+          body: fd,
+        });
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          error?: string;
+          path?: string;
+          displayUrl?: string;
+          imageName?: string;
+        } | null;
+        if (!res.ok || !data?.ok || !data.path || !data.displayUrl) {
+          pushToast(
+            data?.error || "Failed to upload watermark logo",
+            "error",
+          );
+          return;
+        }
+        next.watermark = {
+          ...wm,
+          imageStoragePath: data.path,
+          imageUrl: data.displayUrl,
+          imageName: data.imageName || wm.imageName,
+        };
+      } else if (!wm.imageUrl && !wm.imageStoragePath) {
+        if (mediaSettings.watermark.imageStoragePath) {
+          await fetch("/api/admin/media/watermark-logo", {
+            method: "DELETE",
+            credentials: "same-origin",
+          }).catch(() => undefined);
+        }
+        next.watermark = {
+          ...wm,
+          imageUrl: undefined,
+          imageName: undefined,
+          imageStoragePath: undefined,
+        };
+      }
+
+      const wmChanged =
+        JSON.stringify(mediaSettings.watermark) !==
+        JSON.stringify(next.watermark);
+      const qualityChanged =
+        mediaSettings.defaultPreviewQuality !== next.defaultPreviewQuality;
+
+      setMediaSettings(next);
+
+      // Settings save never auto-starts bulk regen — ask first when eligible.
+      if (wmChanged || qualityChanged) {
+        const eligible = listEligibleVideoAssetsForWatermarkRefresh(
+          mediaAssets,
+          { wmChanged, qualityChanged },
+        );
+        if (eligible.length > 0) {
+          setRefreshConfirm({
+            open: true,
+            count: eligible.length,
+            wmChanged,
+            qualityChanged,
+          });
+        }
+      }
+    } finally {
+      setMediaSaving(false);
+    }
+  };
 
   if (!hydrated || !mediaDraft) return null;
 
@@ -207,6 +309,7 @@ export default function SettingsPage() {
                       ...mediaDraft.watermark,
                       imageUrl: url,
                       imageName: file.name,
+                      imageStoragePath: undefined,
                     },
                   });
                 }}
@@ -241,6 +344,7 @@ export default function SettingsPage() {
                                 ...mediaDraft.watermark,
                                 imageUrl: url,
                                 imageName: file.name,
+                                imageStoragePath: undefined,
                               },
                             });
                           };
@@ -259,6 +363,7 @@ export default function SettingsPage() {
                               ...mediaDraft.watermark,
                               imageUrl: undefined,
                               imageName: undefined,
+                              imageStoragePath: undefined,
                             },
                           })
                         }
@@ -381,10 +486,42 @@ export default function SettingsPage() {
 
             <AdminButton
               variant="primary"
-              onClick={() => setMediaSettings(mediaDraft)}
+              disabled={mediaSaving}
+              onClick={() => void saveMediaSettings()}
             >
-              Save media settings
+              {mediaSaving ? "Saving…" : "Save media settings"}
             </AdminButton>
+
+            {watermarkRefreshProgress && !watermarkRefreshProgress.done ? (
+              <p
+                className="rounded-lg border border-[var(--admin-border)] bg-[var(--admin-surface-2)] px-3 py-2 text-xs text-[var(--admin-muted)]"
+                role="status"
+                aria-live="polite"
+              >
+                Preview refresh: {watermarkRefreshProgress.succeeded} succeeded
+                {watermarkRefreshProgress.failed > 0
+                  ? `, ${watermarkRefreshProgress.failed} failed`
+                  : ""}
+                , {watermarkRefreshProgress.running} running,{" "}
+                {watermarkRefreshProgress.pending} queued (
+                {watermarkRefreshProgress.succeeded +
+                  watermarkRefreshProgress.failed +
+                  watermarkRefreshProgress.running +
+                  watermarkRefreshProgress.pending}
+                /{watermarkRefreshProgress.total})
+              </p>
+            ) : null}
+            {watermarkRefreshProgress?.done ? (
+              <p
+                className="rounded-lg border border-[var(--admin-border)] bg-[var(--admin-surface-2)] px-3 py-2 text-xs text-[var(--admin-muted)]"
+                role="status"
+              >
+                Last refresh: {watermarkRefreshProgress.succeeded} updated
+                {watermarkRefreshProgress.failed > 0
+                  ? `, ${watermarkRefreshProgress.failed} failed (previous previews kept)`
+                  : ""}
+              </p>
+            ) : null}
           </AdminCard>
 
           <AdminCard>
@@ -411,6 +548,30 @@ export default function SettingsPage() {
           </AdminButton>
         </AdminCard>
       ) : null}
+
+      <AdminConfirmDialog
+        open={refreshConfirm.open}
+        onClose={() =>
+          setRefreshConfirm((prev) => ({ ...prev, open: false }))
+        }
+        onConfirm={() => {
+          refreshEligibleWatermarkPreviews({
+            wmChanged: refreshConfirm.wmChanged,
+            qualityChanged: refreshConfirm.qualityChanged,
+          });
+        }}
+        title="Regenerate video previews?"
+        description={
+          refreshConfirm.count === 1
+            ? "1 eligible video preview will be regenerated with the saved watermark/quality settings (max 2 jobs at a time). Cancel to keep existing previews until you regenerate manually."
+            : `${refreshConfirm.count} eligible video previews will be regenerated with the saved watermark/quality settings (max 2 jobs at a time). Cancel to keep existing previews until you regenerate manually.`
+        }
+        confirmLabel={
+          refreshConfirm.count === 1
+            ? "Regenerate 1 preview"
+            : `Regenerate ${refreshConfirm.count} previews`
+        }
+      />
     </div>
   );
 }

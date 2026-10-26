@@ -28,11 +28,13 @@ export default function MediaDetailPage() {
     updateMediaAsset,
     detachMediaFromProduct,
     detachImageAssetFromAiProduct,
+    regenerateMediaPreview,
     pushToast,
   } = useAdmin();
   const [scrub, setScrub] = useState(0);
   const [frameBusy, setFrameBusy] = useState(false);
   const [masterFrameSrc, setMasterFrameSrc] = useState("");
+  const [regenBusy, setRegenBusy] = useState(false);
 
   const asset = useMemo(
     () => mediaAssets.find((a) => a.id === id),
@@ -57,12 +59,16 @@ export default function MediaDetailPage() {
       }
       if (asset.type === "image") {
         if (!cancelled) {
+          const candidate =
+            asset.thumbnail.url || asset.master.url || asset.preview.url || "";
+          // Never feed private Storage refs into image/frame capture.
           setMasterFrameSrc(
-            asset.thumbnail.url || asset.master.url || asset.preview.url || "",
+            candidate.includes("media-masters/") ? "" : candidate,
           );
         }
         return;
       }
+      // Video: private media-masters refs are not browser-playable frame sources.
       if (!cancelled) setMasterFrameSrc("");
     };
     void load();
@@ -70,6 +76,16 @@ export default function MediaDetailPage() {
       cancelled = true;
     };
   }, [asset]);
+
+  useEffect(() => {
+    if (!regenBusy || !asset) return;
+    if (
+      asset.processingStatus === "ready" ||
+      asset.processingStatus === "failed"
+    ) {
+      setRegenBusy(false);
+    }
+  }, [asset, asset?.processingStatus, regenBusy]);
 
   const linkedProducts = useMemo(() => {
     if (!asset) return [];
@@ -340,9 +356,37 @@ export default function MediaDetailPage() {
           </AdminCard>
 
           <AdminCard>
-            <h2 className="mb-3 font-[family-name:var(--font-syne)] text-sm font-semibold uppercase tracking-wide text-[var(--admin-muted)]">
-              Generated assets
-            </h2>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-[family-name:var(--font-syne)] text-sm font-semibold uppercase tracking-wide text-[var(--admin-muted)]">
+                Generated assets
+              </h2>
+              <AdminButton
+                variant="primary"
+                size="sm"
+                disabled={
+                  regenBusy ||
+                  asset.processingStatus === "processing" ||
+                  asset.processingStatus === "queued" ||
+                  asset.processingStatus === "uploading" ||
+                  !asset.master.url
+                }
+                onClick={() => {
+                  setRegenBusy(true);
+                  regenerateMediaPreview(asset.id);
+                }}
+              >
+                {asset.processingStatus === "failed"
+                  ? "Retry Generate Preview"
+                  : asset.processingStatus === "ready"
+                    ? "Regenerate Preview"
+                    : "Generate Preview"}
+              </AdminButton>
+            </div>
+            {asset.processingError ? (
+              <p className="mb-3 text-xs text-[var(--admin-danger)]">
+                {asset.processingError}
+              </p>
+            ) : null}
             <ProcessingStepsList
               steps={asset.processingSteps}
               status={asset.processingStatus}

@@ -9,17 +9,77 @@ import {
 import {
   adminMediaAssetToMediaAssetsRow,
   validateAdminMediaAssetForPublish,
+  type MediaAssetsTableRow,
 } from "@/catalog/mapAdminMediaAssetToSupabase";
 import {
   adminProductToProductsRow,
   adminRelationshipsToRows,
   validateAdminProductForPublish,
 } from "@/catalog/mapAdminProductToSupabase";
+import { isPublicCustomerMediaUrl } from "@/admin/lib/mediaPreview";
 import type { AdminCharacter, AdminProduct, MediaAsset } from "@/admin/types";
 import { createServiceClient } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+
+type ExistingMediaPublicFields = {
+  master_bucket: string | null;
+  master_path: string | null;
+  preview_bucket: string | null;
+  preview_path: string | null;
+  preview_url: string | null;
+  thumbnail_path: string | null;
+  thumbnail_url: string | null;
+  preview_playback: string | null;
+  processing_status: string | null;
+};
+
+/**
+ * Prefer durable DB preview/master fields when CMS payload is stale/empty so
+ * republish cannot wipe worker-generated customer previews.
+ */
+function mergeMediaAssetRowWithExisting(
+  row: MediaAssetsTableRow,
+  existing: ExistingMediaPublicFields | null,
+): MediaAssetsTableRow {
+  if (!existing) return row;
+
+  const next = { ...row };
+
+  if (!next.master_path?.trim() && existing.master_path?.trim()) {
+    next.master_path = existing.master_path;
+    next.master_bucket =
+      existing.master_bucket?.trim() || next.master_bucket || "media-masters";
+  }
+
+  const existingPreviewOk = isPublicCustomerMediaUrl(existing.preview_url);
+  if (!isPublicCustomerMediaUrl(next.preview_url) && existingPreviewOk) {
+    next.preview_url = existing.preview_url;
+    next.preview_path = existing.preview_path;
+    next.preview_bucket =
+      existing.preview_bucket?.trim() || next.preview_bucket || "media-previews";
+    if (existing.preview_playback === "generated") {
+      next.preview_playback = "generated";
+    }
+    if (
+      existing.processing_status === "ready" &&
+      next.processing_status !== "failed"
+    ) {
+      next.processing_status = "ready";
+    }
+  }
+
+  if (
+    !isPublicCustomerMediaUrl(next.thumbnail_url) &&
+    isPublicCustomerMediaUrl(existing.thumbnail_url)
+  ) {
+    next.thumbnail_url = existing.thumbnail_url;
+    next.thumbnail_path = existing.thumbnail_path;
+  }
+
+  return next;
+}
 
 export const runtime = "nodejs";
 
@@ -83,7 +143,18 @@ async function syncMediaAssetDependency(
     };
   }
 
-  const row = adminMediaAssetToMediaAssetsRow(asset);
+  const { data: existing } = await supabase
+    .from("media_assets")
+    .select(
+      "master_bucket, master_path, preview_bucket, preview_path, preview_url, thumbnail_path, thumbnail_url, preview_playback, processing_status",
+    )
+    .eq("id", mediaAssetId)
+    .maybeSingle();
+
+  const row = mergeMediaAssetRowWithExisting(
+    adminMediaAssetToMediaAssetsRow(asset),
+    (existing as ExistingMediaPublicFields | null) ?? null,
+  );
   const { error } = await supabase
     .from("media_assets")
     .upsert(row, { onConflict: "id" });
@@ -260,7 +331,7 @@ export async function POST(request: Request) {
     asMediaAssetArray(payload?.mediaAssets).map((a) => [a.id, a]),
   );
 
-  const row = adminProductToProductsRow(product);
+  let row = adminProductToProductsRow(product);
   const relationshipRows = adminRelationshipsToRows(
     product.id,
     product.relationships,
@@ -281,6 +352,34 @@ export async function POST(request: Request) {
       mediaAssetsById,
     );
     if (!synced.ok) return synced.response;
+
+    // Copy durable public preview/thumbnail onto product.media so
+    // catalog_products exposes playable URLs (anon cannot read media_assets).
+    const { data: mediaPublic } = await supabase
+      .from("media_assets")
+      .select("preview_url, thumbnail_url, preview_playback")
+      .eq("id", row.media_asset_id)
+      .maybeSingle();
+
+    if (mediaPublic) {
+      const previewUrl =
+        mediaPublic.preview_playback === "generated" &&
+        isPublicCustomerMediaUrl(mediaPublic.preview_url)
+          ? String(mediaPublic.preview_url).trim()
+          : "";
+      const thumbUrl = isPublicCustomerMediaUrl(mediaPublic.thumbnail_url)
+        ? String(mediaPublic.thumbnail_url).trim()
+        : "";
+      if (previewUrl || thumbUrl) {
+        const media = {
+          ...(row.media && typeof row.media === "object" ? row.media : {}),
+        } as AdminProduct["media"];
+        if (previewUrl) media.previewVideo = previewUrl;
+        if (thumbUrl) media.thumbnail = thumbUrl;
+        else if (!media.thumbnail) media.thumbnail = "";
+        row = { ...row, media };
+      }
+    }
   }
 
   // 2) Sync referenced character from real CMS data (never inventing).

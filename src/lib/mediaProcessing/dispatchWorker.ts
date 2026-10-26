@@ -4,6 +4,7 @@
  */
 
 import type {
+  WorkerEnqueueResult,
   WorkerProcessPayload,
   WorkerProcessResult,
 } from "@/lib/mediaProcessing/types";
@@ -29,8 +30,78 @@ export function getWorkerConfig():
 }
 
 /**
- * POST to the dedicated worker. Holds the connection until FFmpeg finishes
- * (or fails). Secrets stay server-side; response never includes them.
+ * Enqueue on the dedicated long-lived worker (async: true).
+ * Returns as soon as the worker accepts the job — FFmpeg runs in the worker
+ * process, not on Vercel. Status/URLs are persisted to media_assets by the worker.
+ */
+export async function enqueueWorkerProcess(
+  payload: Omit<WorkerProcessPayload, "async">,
+): Promise<WorkerEnqueueResult> {
+  const config = getWorkerConfig();
+  if (!config.ok) {
+    return { ok: false, error: config.error };
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${config.url}/process`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.secret}`,
+      },
+      body: JSON.stringify({ ...payload, async: true }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Worker unreachable";
+    return { ok: false, error: `Worker dispatch failed: ${message}` };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return {
+      ok: false,
+      error: `Worker returned non-JSON (${response.status})`,
+    };
+  }
+
+  if (!body || typeof body !== "object") {
+    return { ok: false, error: "Worker returned an invalid payload" };
+  }
+
+  const parsed = body as Record<string, unknown>;
+
+  if (response.status === 202 && parsed.ok === true) {
+    const status =
+      parsed.status === "processing" ? "processing" : "queued";
+    return {
+      ok: true,
+      accepted: true,
+      status,
+      mediaAssetId: String(parsed.mediaAssetId ?? payload.mediaAssetId),
+      message:
+        typeof parsed.message === "string" ? parsed.message : undefined,
+    };
+  }
+
+  if (parsed.ok === false && typeof parsed.error === "string") {
+    return { ok: false, error: parsed.error };
+  }
+
+  return {
+    ok: false,
+    error:
+      typeof parsed.error === "string"
+        ? parsed.error
+        : `Worker HTTP ${response.status}`,
+  };
+}
+
+/**
+ * Legacy synchronous dispatch (holds until FFmpeg finishes). Prefer
+ * enqueueWorkerProcess for Admin/Vercel paths.
  */
 export async function dispatchWorkerProcess(
   payload: WorkerProcessPayload,
@@ -48,7 +119,7 @@ export async function dispatchWorkerProcess(
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.secret}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, async: false }),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Worker unreachable";

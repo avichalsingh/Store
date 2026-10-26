@@ -3,10 +3,25 @@ import {
   adminSessionCookieOptions,
   deriveAdminSessionToken,
   isAdminPasswordValid,
+  isAdminSessionTokenValid,
 } from "@/admin/lib/adminSessionCookie";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+
+/**
+ * Lightweight check: is the httpOnly admin API session cookie valid?
+ * Used by AuthGate so Media upload/publish cannot run on localStorage-only "login".
+ */
+export async function GET() {
+  const cookieStore = await cookies();
+  const sessionToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
+  if (!isAdminSessionTokenValid(sessionToken)) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+  return NextResponse.json({ ok: true });
+}
 
 /**
  * Establish httpOnly admin session cookie for catalog publish.

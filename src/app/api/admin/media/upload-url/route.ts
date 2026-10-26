@@ -4,8 +4,10 @@ import {
 } from "@/admin/lib/adminSessionCookie";
 import { createServiceClient } from "@/lib/supabase/admin";
 import {
+  MEDIA_FILE_SIZE_LIMIT_BYTES,
   createSignedMediaUploadAuthorization,
   ensureMediaBuckets,
+  getMediaBucketFileSizeLimit,
   isAllowedMediaContentType,
   type MediaStorageKind,
 } from "@/lib/supabase/mediaStorage";
@@ -20,8 +22,7 @@ export const maxDuration = 30;
 /** Direct/resumable path is for large video objects (master + preview). */
 const DIRECT_KINDS = new Set<MediaStorageKind>(["master", "preview"]);
 
-const MAX_BYTES = 500 * 1024 * 1024; // 500 MB
-
+const MAX_BYTES = MEDIA_FILE_SIZE_LIMIT_BYTES;
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
@@ -101,7 +102,22 @@ export async function POST(request: Request) {
 
   const buckets = await ensureMediaBuckets(supabase);
   if (!buckets.ok) {
+    // Typically: project global Storage limit < 500 MB blocks bucket fileSizeLimit.
     return NextResponse.json({ error: buckets.error }, { status: 500 });
+  }
+
+  const bucketLimit = await getMediaBucketFileSizeLimit(supabase, kindRaw);
+  // When unset, Supabase still enforces the project global default (often 50 MB).
+  const effectiveLimit = bucketLimit ?? 52_428_800;
+  if (fileSize > effectiveLimit) {
+    return NextResponse.json(
+      {
+        error: `File is ${fileSize} bytes but the effective Storage limit is ${effectiveLimit} bytes${
+          bucketLimit === null ? " (project default; bucket limit unset)" : ""
+        }. Raise the Supabase project global file size limit to at least 500 MB (Dashboard → Project Settings → Storage → Global file size limit), then retry. Bucket limits cannot exceed the project global limit.`,
+      },
+      { status: 413 },
+    );
   }
 
   const authorized = await createSignedMediaUploadAuthorization(supabase, {
@@ -111,7 +127,6 @@ export async function POST(request: Request) {
     fileName,
     contentType: contentType || "video/mp4",
   });
-
   if (!authorized.ok) {
     return NextResponse.json({ error: authorized.error }, { status: 500 });
   }
