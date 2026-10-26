@@ -5,6 +5,8 @@
 
 export type WorkerEnv = {
   port: number;
+  /** Max simultaneous FFmpeg jobs (different assets). Default 1 for 512MB hosts. */
+  maxConcurrentJobs: number;
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
   workerSharedSecret: string;
@@ -19,6 +21,9 @@ export function loadWorkerEnv(): WorkerEnv {
     process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || "";
   const workerSharedSecret = process.env.WORKER_SHARED_SECRET?.trim() || "";
   const port = Number(process.env.PORT || process.env.WORKER_PORT || 8787);
+  const maxRaw = Number(process.env.WORKER_MAX_CONCURRENT_JOBS ?? "1");
+  const maxConcurrentJobs =
+    Number.isFinite(maxRaw) && maxRaw >= 1 ? Math.floor(maxRaw) : 1;
 
   if (!supabaseUrl) {
     throw new Error("SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) is required");
@@ -35,6 +40,7 @@ export function loadWorkerEnv(): WorkerEnv {
 
   return {
     port,
+    maxConcurrentJobs,
     supabaseUrl,
     supabaseServiceRoleKey,
     workerSharedSecret,

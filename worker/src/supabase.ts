@@ -17,14 +17,26 @@ export const CUSTOMER_PREVIEW_MAX_SECONDS = 8;
 /** Short-lived signed URL for worker-only master download (never sent to browsers). */
 const MASTER_SIGNED_URL_SECONDS = 60 * 30; // 30 minutes
 
+/**
+ * Storage + PostgREST only (no Realtime channels used).
+ * createClient still constructs a Realtime client, which requires native
+ * WebSocket (Node.js 22+). Do not connect or subscribe.
+ */
 export function createWorkerSupabase(
   url: string,
   serviceRoleKey: string,
 ): SupabaseClient {
+  if (typeof WebSocket === "undefined") {
+    throw new Error(
+      "Native WebSocket is required (Node.js 22+). " +
+        "This worker image must not run on Node.js 20 or older.",
+    );
+  }
   return createClient(url, serviceRoleKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
+      detectSessionInUrl: false,
     },
   });
 }

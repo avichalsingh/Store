@@ -9,6 +9,8 @@ import {
 
 /** In-flight jobs by mediaAssetId — prevents concurrent FFmpeg for one asset. */
 const activeJobs = new Set<string>();
+/** FIFO of accepted async jobs waiting for a concurrency slot. */
+const pendingQueue: WorkerProcessPayload[] = [];
 
 function readJson(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -82,9 +84,40 @@ function parsePayload(body: unknown): WorkerProcessPayload | null {
   };
 }
 
+function isQueuedOrActive(mediaAssetId: string): boolean {
+  if (activeJobs.has(mediaAssetId)) return true;
+  return pendingQueue.some((p) => p.mediaAssetId === mediaAssetId);
+}
+
 async function main(): Promise<void> {
   const env = loadWorkerEnv();
   const runJob = createJobRunner(env.supabaseUrl, env.supabaseServiceRoleKey);
+
+  const drainQueue = () => {
+    while (
+      activeJobs.size < env.maxConcurrentJobs &&
+      pendingQueue.length > 0
+    ) {
+      const payload = pendingQueue.shift()!;
+      const { mediaAssetId } = payload;
+      if (activeJobs.has(mediaAssetId)) {
+        continue;
+      }
+      activeJobs.add(mediaAssetId);
+      void runJob(payload)
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error(
+            `[worker] async job failed mediaAssetId=${mediaAssetId}`,
+            err instanceof Error ? err.message : err,
+          );
+        })
+        .finally(() => {
+          activeJobs.delete(mediaAssetId);
+          drainQueue();
+        });
+    }
+  };
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -94,6 +127,8 @@ async function main(): Promise<void> {
         ok: true,
         service: "rhythm-media-worker",
         activeJobs: activeJobs.size,
+        pendingJobs: pendingQueue.length,
+        maxConcurrentJobs: env.maxConcurrentJobs,
       });
       return;
     }
@@ -124,8 +159,8 @@ async function main(): Promise<void> {
 
       const { mediaAssetId, force, async: runAsync } = payload;
 
-      // Idempotent: one concurrent FFmpeg job per asset.
-      if (activeJobs.has(mediaAssetId) && !force) {
+      // Idempotent: one concurrent/queued FFmpeg job per asset.
+      if (isQueuedOrActive(mediaAssetId) && !force) {
         sendJson(res, 202, {
           ok: true,
           accepted: true,
@@ -149,7 +184,14 @@ async function main(): Promise<void> {
           return;
         }
 
-        activeJobs.add(mediaAssetId);
+        // Drop duplicate pending entries when re-queueing the same asset.
+        for (let i = pendingQueue.length - 1; i >= 0; i--) {
+          if (pendingQueue[i]?.mediaAssetId === mediaAssetId) {
+            pendingQueue.splice(i, 1);
+          }
+        }
+
+        pendingQueue.push(payload);
         sendJson(res, 202, {
           ok: true,
           accepted: true,
@@ -157,18 +199,7 @@ async function main(): Promise<void> {
           mediaAssetId,
           message: "Job accepted — processing in background",
         });
-
-        void runJob(payload)
-          .catch((err) => {
-            // eslint-disable-next-line no-console
-            console.error(
-              `[worker] async job failed mediaAssetId=${mediaAssetId}`,
-              err instanceof Error ? err.message : err,
-            );
-          })
-          .finally(() => {
-            activeJobs.delete(mediaAssetId);
-          });
+        drainQueue();
         return;
       }
 
@@ -190,6 +221,7 @@ async function main(): Promise<void> {
         sendJson(res, result.ok ? 200 : 500, result);
       } finally {
         activeJobs.delete(mediaAssetId);
+        drainQueue();
       }
       return;
     }
@@ -197,10 +229,26 @@ async function main(): Promise<void> {
     sendJson(res, 404, { ok: false, error: "Not found" });
   });
 
-  server.listen(env.port, () => {
+  // Render (and most PaaS) require binding all interfaces; PORT is injected.
+  server.listen(env.port, "0.0.0.0", () => {
     // eslint-disable-next-line no-console
-    console.log(`rhythm-media-worker listening on :${env.port}`);
+    console.log(
+      `rhythm-media-worker listening on 0.0.0.0:${env.port} ` +
+        `(maxConcurrentJobs=${env.maxConcurrentJobs})`,
+    );
   });
+
+  const shutdown = (signal: string) => {
+    // eslint-disable-next-line no-console
+    console.log(`[worker] ${signal} received — closing HTTP server`);
+    server.close(() => {
+      process.exit(0);
+    });
+    // Do not force-kill in-flight FFmpeg; allow platform SIGKILL if needed.
+    setTimeout(() => process.exit(0), 25_000).unref();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((err) => {
