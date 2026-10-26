@@ -1,4 +1,4 @@
-import { mkdtemp, rm, access } from "node:fs/promises";
+import { mkdtemp, rm, access, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -220,6 +220,13 @@ export async function processMediaJob(
 
     if (!(await fileExists(previewFile)) || !(await fileExists(thumbFile))) {
       throw new Error("FFmpeg did not produce both required output files");
+    }
+
+    // Drop the private master from disk before uploads so OS page cache and
+    // tmp pressure fall while we only need the small preview/thumb outputs.
+    await unlink(masterFile).catch(() => undefined);
+    if (logoPathOnDisk) {
+      await unlink(logoPathOnDisk).catch(() => undefined);
     }
 
     const previewUpload = await uploadPublicObject(

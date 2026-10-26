@@ -32,6 +32,10 @@ ENV WORKER_WATERMARK_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
 ENV PORT=8787
 # Bound FFmpeg concurrency for small Render instances (override via env).
 ENV WORKER_MAX_CONCURRENT_JOBS=1
+# Cap Node heap so FFmpeg retains headroom on 512MB instances (do not raise concurrency).
+ENV NODE_OPTIONS=--max-old-space-size=192
+# Reduce glibc allocator arenas (lower RSS fragmentation under load).
+ENV MALLOC_ARENA_MAX=2
 EXPOSE 8787
 
 CMD ["node", "dist/index.js"]

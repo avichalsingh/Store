@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { loadWorkerEnv } from "./config.js";
+import { terminateAllFfmpeg } from "./ffmpeg.js";
 import {
   createJobRunner,
   type WorkerProcessPayload,
@@ -241,11 +242,15 @@ async function main(): Promise<void> {
   const shutdown = (signal: string) => {
     // eslint-disable-next-line no-console
     console.log(`[worker] ${signal} received — closing HTTP server`);
+    terminateAllFfmpeg("SIGTERM");
     server.close(() => {
       process.exit(0);
     });
-    // Do not force-kill in-flight FFmpeg; allow platform SIGKILL if needed.
-    setTimeout(() => process.exit(0), 25_000).unref();
+    // If FFmpeg/jobs outlive the drain window, exit; platform may SIGKILL sooner.
+    setTimeout(() => {
+      terminateAllFfmpeg("SIGKILL");
+      process.exit(0);
+    }, 25_000).unref();
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));

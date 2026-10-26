@@ -1,5 +1,5 @@
-import { createWriteStream } from "node:fs";
-import { unlink, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { stat, unlink, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -137,24 +137,42 @@ export async function downloadWatermarkLogoToFile(
   await writeFile(destFile, buf);
 }
 
+/**
+ * Upload a local file to the public previews bucket via a disk stream.
+ * Never readFile()s the whole object into a Buffer (OOM risk on small hosts).
+ */
 export async function uploadPublicObject(
   supabase: SupabaseClient,
   path: string,
   filePath: string,
   contentType: string,
 ): Promise<{ path: string; publicUrl: string }> {
-  const fs = await import("node:fs/promises");
-  const bytes = await fs.readFile(filePath);
-  const { error } = await supabase.storage
-    .from(MEDIA_PREVIEWS_BUCKET)
-    .upload(path, bytes, {
-      contentType,
-      upsert: true,
-      cacheControl: "3600",
-    });
-  if (error) {
-    throw new Error(`Failed to upload ${path}: ${error.message}`);
+  const { size } = await stat(filePath);
+  if (!Number.isFinite(size) || size <= 0) {
+    throw new Error(`Failed to upload ${path}: empty or missing local file`);
   }
+
+  const stream = createReadStream(filePath);
+  try {
+    const { error } = await supabase.storage
+      .from(MEDIA_PREVIEWS_BUCKET)
+      .upload(path, stream, {
+        contentType,
+        upsert: true,
+        cacheControl: "3600",
+        duplex: "half",
+        headers: {
+          "Content-Length": String(size),
+        },
+      });
+    if (error) {
+      throw new Error(`Failed to upload ${path}: ${error.message}`);
+    }
+  } catch (err) {
+    stream.destroy();
+    throw err;
+  }
+
   const { data } = supabase.storage
     .from(MEDIA_PREVIEWS_BUCKET)
     .getPublicUrl(path);

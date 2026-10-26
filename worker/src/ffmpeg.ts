@@ -54,24 +54,70 @@ function forceKillChild(child: ChildProcess): void {
   }
 }
 
+/** In-flight ffmpeg children — terminated on worker shutdown / timeout. */
+const activeChildren = new Set<ChildProcess>();
+
+/**
+ * Cap decode/filter/encode thread pools so peak RSS stays lower on 512MB hosts.
+ * Does not change bitrate, resolution, watermark filters, or output profile.
+ */
+const MEMORY_SAFE_GLOBAL_ARGS = [
+  "-threads",
+  "1",
+  "-filter_threads",
+  "1",
+  "-filter_complex_threads",
+  "1",
+] as const;
+
+/** SIGTERM/SIGINT: stop any running ffmpeg before the process exits. */
+export function terminateAllFfmpeg(signal: NodeJS.Signals = "SIGTERM"): void {
+  for (const child of activeChildren) {
+    try {
+      if (!child.killed && child.exitCode === null) {
+        child.kill(signal);
+      }
+    } catch {
+      // Ignore — process may already be gone.
+    }
+  }
+  if (signal === "SIGTERM") {
+    setTimeout(() => {
+      for (const child of activeChildren) {
+        forceKillChild(child);
+      }
+    }, KILL_GRACE_MS).unref();
+  }
+}
+
 function runFfmpeg(args: string[]): Promise<void> {
   const timeoutMs = getFfmpegTimeoutMs();
 
   return new Promise((resolve, reject) => {
-    const child = spawn("ffmpeg", ["-y", ...args], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+    const child = spawn(
+      "ffmpeg",
+      ["-y", ...MEMORY_SAFE_GLOBAL_ARGS, ...args],
+      {
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    activeChildren.add(child);
 
     let stderr = "";
     let settled = false;
     let timedOut = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
 
+    const detach = () => {
+      activeChildren.delete(child);
+    };
+
     const finishOk = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timeoutTimer);
       if (killTimer) clearTimeout(killTimer);
+      detach();
       resolve();
     };
 
@@ -80,6 +126,7 @@ function runFfmpeg(args: string[]): Promise<void> {
       settled = true;
       clearTimeout(timeoutTimer);
       if (!timedOut && killTimer) clearTimeout(killTimer);
+      detach();
       reject(err);
     };
 
@@ -118,6 +165,7 @@ function runFfmpeg(args: string[]): Promise<void> {
       if (killTimer) clearTimeout(killTimer);
       if (timedOut) {
         forceKillChild(child);
+        detach();
         return;
       }
       if (code === 0) {
