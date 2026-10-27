@@ -118,15 +118,35 @@ if (!migSrc.includes("GRANT SELECT ON public.catalog_products")) {
   fail("migration must preserve catalog_products SELECT for anon");
 }
 // Ignore SQL comments when checking for destructive statements.
-const migCode = migSrc
+const migCodeLines = migSrc
   .split("\n")
   .filter((line) => !/^\s*--/.test(line))
-  .join("\n");
+  .map((line) => line.trim())
+  .filter(Boolean);
+const migCode = migCodeLines.join("\n");
 if (/\bDROP\s+TABLE\b/i.test(migCode) || /\bTRUNCATE\b/i.test(migCode)) {
   fail("migration must not drop/truncate tables");
 }
 if (/\bDELETE\s+FROM\b/i.test(migCode)) {
   fail("migration must not DELETE rows");
+}
+const beginIdx = migCodeLines.findIndex((line) => /^BEGIN\s*;?\s*$/i.test(line));
+const commitIdx = migCodeLines.findIndex((line) => /^COMMIT\s*;?\s*$/i.test(line));
+if (beginIdx < 0 || commitIdx < 0 || beginIdx >= commitIdx) {
+  fail("migration must wrap DB changes in a top-level BEGIN … COMMIT transaction");
+}
+const txnBody = migCodeLines.slice(beginIdx + 1, commitIdx).join("\n");
+for (const needle of [
+  "DROP POLICY IF EXISTS media_masters_restrict_anon",
+  "CREATE POLICY media_masters_restrict_anon",
+  "DROP POLICY IF EXISTS media_previews_public_select",
+  "CREATE POLICY media_previews_public_select",
+  "INSERT INTO storage.buckets",
+  "GRANT SELECT ON public.catalog_products",
+]) {
+  if (!txnBody.includes(needle)) {
+    fail(`migration transaction must include: ${needle}`);
+  }
 }
 ok("security migration production-safe invariants");
 

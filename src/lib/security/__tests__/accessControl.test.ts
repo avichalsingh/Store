@@ -117,6 +117,27 @@ describe("security migration guarantees", () => {
     assert.match(mig, /ADD COLUMN IF NOT EXISTS master_path/);
     assert.match(mig, /CREATE TABLE IF NOT EXISTS public\.media_assets/);
   });
+
+  it("runs policy and bucket updates inside one top-level transaction", () => {
+    const codeLines = mig
+      .split("\n")
+      .filter((line) => !/^\s*--/.test(line))
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const beginIdx = codeLines.findIndex((line) => /^BEGIN\s*;?\s*$/i.test(line));
+    const commitIdx = codeLines.findIndex((line) =>
+      /^COMMIT\s*;?\s*$/i.test(line),
+    );
+    assert.ok(beginIdx >= 0, "expected top-level BEGIN");
+    assert.ok(commitIdx > beginIdx, "expected top-level COMMIT after BEGIN");
+    const body = codeLines.slice(beginIdx + 1, commitIdx).join("\n");
+    assert.match(body, /DROP POLICY IF EXISTS media_masters_restrict_anon/);
+    assert.match(body, /CREATE POLICY media_masters_restrict_anon/);
+    assert.match(body, /DROP POLICY IF EXISTS media_previews_public_select/);
+    assert.match(body, /CREATE POLICY media_previews_public_select/);
+    assert.match(body, /INSERT INTO storage\.buckets/);
+    assert.match(body, /GRANT SELECT ON public\.catalog_products/);
+  });
 });
 
 describe("secrets stay server-only in client entrypoints", () => {

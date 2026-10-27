@@ -10,6 +10,13 @@
 --
 -- Preserves: anon SELECT on catalog_products; public media-previews reads.
 -- Service role continues to bypass RLS (Admin APIs + FFmpeg worker).
+--
+-- Atomicity: wrapped in a single top-level transaction so a failure between
+-- DROP POLICY and CREATE POLICY rolls back (SQL Editor / psql).
+-- If a migrator already wraps each file in a transaction, omit the outer
+-- BEGIN/COMMIT lines below to avoid an early COMMIT of the outer txn.
+
+BEGIN;
 
 -- ---------------------------------------------------------------------------
 -- Prerequisites (fail closed if Phase A helpers are missing)
@@ -227,3 +234,5 @@ CREATE POLICY media_previews_auth_admin_write
 
 REVOKE ALL ON TABLE public.products FROM anon;
 GRANT SELECT ON public.catalog_products TO anon, authenticated;
+
+COMMIT;
