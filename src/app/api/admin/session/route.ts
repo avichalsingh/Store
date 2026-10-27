@@ -5,10 +5,16 @@ import {
   isAdminPasswordValid,
   isAdminSessionTokenValid,
 } from "@/admin/lib/adminSessionCookie";
+import {
+  clientIpFromRequest,
+  rateLimit,
+} from "@/lib/security/rateLimit";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+const LOGIN_LIMIT = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * Lightweight check: is the httpOnly admin API session cookie valid?
@@ -18,7 +24,10 @@ export async function GET() {
   const cookieStore = await cookies();
   const sessionToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
   if (!isAdminSessionTokenValid(sessionToken)) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, error: "Unauthorized" },
+      { status: 401 },
+    );
   }
   return NextResponse.json({ ok: true });
 }
@@ -28,6 +37,21 @@ export async function GET() {
  * Password must match server-only ADMIN_API_SECRET (never returned to client).
  */
 export async function POST(request: Request) {
+  const ip = clientIpFromRequest(request);
+  const limited = rateLimit(`admin-login:${ip}`, {
+    limit: LOGIN_LIMIT,
+    windowMs: LOGIN_WINDOW_MS,
+  });
+  if (!limited.ok) {
+    return NextResponse.json(
+      { error: "Too many login attempts. Try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSec) },
+      },
+    );
+  }
+
   let body: { password?: string };
   try {
     body = (await request.json()) as { password?: string };
@@ -42,6 +66,10 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  // Bound password size to limit timing/CPU abuse.
+  if (password.length > 512) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   if (!process.env.ADMIN_API_SECRET?.trim()) {
     return NextResponse.json(
@@ -51,10 +79,7 @@ export async function POST(request: Request) {
   }
 
   if (!isAdminPasswordValid(password)) {
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401 },
-    );
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const token = deriveAdminSessionToken();

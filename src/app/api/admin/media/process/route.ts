@@ -11,6 +11,10 @@ import {
 } from "@/lib/mediaProcessing/resolveMaster";
 import type { MediaProcessRequestBody } from "@/lib/mediaProcessing/types";
 import { sanitizeWorkerWatermark } from "@/lib/mediaProcessing/watermarkConfig";
+import {
+  clientIpFromRequest,
+  rateLimit,
+} from "@/lib/security/rateLimit";
 import { createServiceClient } from "@/lib/supabase/admin";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -41,6 +45,20 @@ export async function POST(request: Request) {
   const sessionToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
   if (!isAdminSessionTokenValid(sessionToken)) {
     return unauthorized();
+  }
+
+  const limited = rateLimit(`media-process:${clientIpFromRequest(request)}`, {
+    limit: 30,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (!limited.ok) {
+    return NextResponse.json(
+      { error: "Too many process requests. Try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSec) },
+      },
+    );
   }
 
   if (

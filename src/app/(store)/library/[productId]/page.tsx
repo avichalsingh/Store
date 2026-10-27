@@ -141,12 +141,30 @@ export default function LibraryProductPage() {
         {type === "VIDEO" && (
           <div className="rounded-3xl border border-border bg-surface p-6">
             <p className="text-sm text-muted">
-              Your video download is ready. In production this would stream or
-              deliver the master file.
+              Master downloads require server-verified purchase entitlements.
+              Client-side purchase state alone cannot unlock original files.
             </p>
             <button
               type="button"
               className="mt-4 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white"
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/library/download", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ productId }),
+                  });
+                  const data = (await res.json().catch(() => null)) as {
+                    error?: string;
+                  } | null;
+                  window.alert(
+                    data?.error ||
+                      "Download is unavailable until secure entitlements are enabled.",
+                  );
+                } catch {
+                  window.alert("Download request failed.");
+                }
+              }}
             >
               <Download size={16} />
               Download video

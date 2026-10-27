@@ -5,6 +5,7 @@ import {
   type CatalogProductRow,
   type CatalogRelationshipRow,
 } from "@/catalog/mapSupabaseProduct";
+import { sanitizePublicMediaUrl } from "@/lib/security/publicMedia";
 import { createServiceClient } from "@/lib/supabase/admin";
 import type { CatalogProduct } from "@/types";
 import { NextResponse } from "next/server";
@@ -51,12 +52,34 @@ async function loadPublicMediaRows(
       console.error("[api/catalog] media_assets public fields:", error.message);
       return [];
     }
-    return (data ?? []) as CatalogMediaPublicRow[];
+    return ((data ?? []) as CatalogMediaPublicRow[]).map((row) => ({
+      ...row,
+      preview_url: sanitizePublicMediaUrl(row.preview_url) ?? null,
+      thumbnail_url: sanitizePublicMediaUrl(row.thumbnail_url) ?? null,
+    }));
   } catch (err) {
     const message = err instanceof Error ? err.message : "media_assets load failed";
     console.error("[api/catalog] media_assets public fields:", message);
     return [];
   }
+}
+
+/** Final pass: never ship master Storage URLs on the public catalog API. */
+function hardenPublicProducts(products: CatalogProduct[]): CatalogProduct[] {
+  return products.map((p) => {
+    const thumbnail = sanitizePublicMediaUrl(p.thumbnail) ?? "";
+    const previewVideo = sanitizePublicMediaUrl(
+      "previewVideo" in p ? (p as { previewVideo?: string }).previewVideo : undefined,
+    );
+    if ("previewVideo" in p) {
+      return {
+        ...p,
+        thumbnail,
+        previewVideo,
+      } as CatalogProduct;
+    }
+    return { ...p, thumbnail };
+  });
 }
 
 /**
@@ -81,7 +104,7 @@ export async function GET() {
       return NextResponse.json(
         {
           products: [],
-          error: productsResult.error.message,
+          error: "Catalog temporarily unavailable",
         } satisfies CatalogApiResponse,
         { status: 502 },
       );
@@ -95,22 +118,45 @@ export async function GET() {
       return NextResponse.json(
         {
           products: [],
-          error: relationshipsResult.error.message,
+          error: "Catalog temporarily unavailable",
         } satisfies CatalogApiResponse,
         { status: 502 },
       );
     }
 
-    const productRows = (productsResult.data ?? []) as CatalogProductRow[];
+    const productRows = ((productsResult.data ?? []) as CatalogProductRow[]).map(
+      (row) => {
+        const media =
+          row.media && typeof row.media === "object"
+            ? (row.media as Record<string, unknown>)
+            : {};
+        return {
+          ...row,
+          media: {
+            thumbnail:
+              sanitizePublicMediaUrl(
+                typeof media.thumbnail === "string" ? media.thumbnail : undefined,
+              ) ?? "",
+            previewVideo: sanitizePublicMediaUrl(
+              typeof media.previewVideo === "string"
+                ? media.previewVideo
+                : undefined,
+            ),
+          },
+        };
+      },
+    );
     const mediaAssetIds = productRows
       .map((p) => p.media_asset_id)
       .filter((id): id is string => Boolean(id?.trim()));
     const mediaRows = await loadPublicMediaRows(mediaAssetIds);
 
-    const products = mapCatalogViewsToProducts(
-      productRows,
-      (relationshipsResult.data ?? []) as CatalogRelationshipRow[],
-      mediaRows,
+    const products = hardenPublicProducts(
+      mapCatalogViewsToProducts(
+        productRows,
+        (relationshipsResult.data ?? []) as CatalogRelationshipRow[],
+        mediaRows,
+      ),
     );
 
     return NextResponse.json({
@@ -120,7 +166,10 @@ export async function GET() {
     const message = err instanceof Error ? err.message : "Catalog fetch failed";
     console.error("[api/catalog]", message);
     return NextResponse.json(
-      { products: [], error: message } satisfies CatalogApiResponse,
+      {
+        products: [],
+        error: "Catalog temporarily unavailable",
+      } satisfies CatalogApiResponse,
       { status: 500 },
     );
   }

@@ -1,6 +1,15 @@
+import { requireAdminSession } from "@/lib/security/adminAuth";
+import {
+  clientIpFromRequest,
+  rateLimit,
+} from "@/lib/security/rateLimit";
+import { assertSafeOutboundUrl } from "@/lib/security/ssrf";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+const MAX_HTML_BYTES = 1_500_000;
+const FETCH_TIMEOUT_MS = 8_000;
 
 type Extracted = {
   name: string;
@@ -69,7 +78,10 @@ function extractTitle(html: string): string {
   return m?.[1] ? decodeHtml(m[1].trim()) : "";
 }
 
-function parsePage(html: string, pageUrl: string): {
+function parsePage(
+  html: string,
+  pageUrl: string,
+): {
   extracted: Extracted;
   warnings: string[];
 } {
@@ -111,6 +123,24 @@ function parsePage(html: string, pageUrl: string): {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireAdminSession();
+  if (!auth.ok) return auth.response;
+
+  const ip = clientIpFromRequest(request);
+  const limited = rateLimit(`tools-import:${ip}`, {
+    limit: 20,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (!limited.ok) {
+    return NextResponse.json(
+      { ok: false, message: "Too many import requests. Try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSec) },
+      },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -135,6 +165,17 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (url.length > 2048) {
+    return NextResponse.json(
+      { ok: false, message: "URL is too long." },
+      { status: 400 },
+    );
+  }
+
+  const unsafe = assertSafeOutboundUrl(url);
+  if (unsafe) {
+    return NextResponse.json({ ok: false, message: unsafe }, { status: 400 });
+  }
 
   let parsed: URL;
   try {
@@ -146,15 +187,8 @@ export async function POST(request: Request) {
     );
   }
 
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return NextResponse.json(
-      { ok: false, message: "Only http and https URLs are allowed." },
-      { status: 400 },
-    );
-  }
-
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
     const res = await fetch(parsed.toString(), {
@@ -166,6 +200,15 @@ export async function POST(request: Request) {
         Accept: "text/html,application/xhtml+xml",
       },
     });
+
+    // Re-check final URL after redirects (best-effort SSRF hardening).
+    const finalUnsafe = assertSafeOutboundUrl(res.url || parsed.toString());
+    if (finalUnsafe) {
+      return NextResponse.json(
+        { ok: false, message: "Redirect target is not allowed." },
+        { status: 400 },
+      );
+    }
 
     if (!res.ok) {
       return NextResponse.json({
@@ -189,7 +232,15 @@ export async function POST(request: Request) {
       });
     }
 
-    const html = await res.text();
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > MAX_HTML_BYTES) {
+      return NextResponse.json({
+        ok: false,
+        url: parsed.toString(),
+        message: "Remote page is too large to import.",
+      });
+    }
+    const html = new TextDecoder("utf-8", { fatal: false }).decode(buf);
     const { extracted, warnings } = parsePage(html, parsed.toString());
 
     return NextResponse.json({
@@ -207,9 +258,7 @@ export async function POST(request: Request) {
       url: parsed.toString(),
       message: aborted
         ? "Request timed out after 8 seconds."
-        : err instanceof Error
-          ? err.message
-          : "Failed to fetch URL.",
+        : "Failed to fetch URL.",
     });
   } finally {
     clearTimeout(timeout);
