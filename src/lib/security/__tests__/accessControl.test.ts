@@ -13,17 +13,23 @@ import { assertSafeOutboundUrl } from "../ssrf";
 const root = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 describe("paid download fail-closed", () => {
-  it("library download route returns entitlement required / 403", () => {
+  it("library download is auth + entitlement gated before signing", () => {
     const src = readFileSync(
       join(root, "src/app/api/library/download/route.ts"),
       "utf8",
     );
-    assert.match(src, /status:\s*403/);
-    assert.match(src, /ENTITLEMENT_REQUIRED/);
-    assert.doesNotMatch(src, /createSignedUrl/);
-    assert.doesNotMatch(src, /SERVICE_ROLE/);
+    const helper = readFileSync(
+      join(root, "src/lib/commerce/download.ts"),
+      "utf8",
+    );
+    assert.match(src, /AUTH_REQUIRED|getUser/);
+    assert.match(src, /createEntitledMasterDownload/);
+    assert.match(helper, /ENTITLEMENT_REQUIRED/);
+    assert.match(helper, /createSignedUrl/);
+    assert.doesNotMatch(src, /master_path/);
   });
 });
+
 
 describe("middleware admin gates", () => {
   it("gates /admin and /api/admin except login POST", () => {

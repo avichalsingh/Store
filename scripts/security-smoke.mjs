@@ -73,10 +73,75 @@ const dl = readFileSync(
   join(root, "src/app/api/library/download/route.ts"),
   "utf8",
 );
-if (!dl.includes("403") || !dl.includes("ENTITLEMENT_REQUIRED")) {
-  fail("library download must fail closed without entitlements");
+const dlHelper = readFileSync(
+  join(root, "src/lib/commerce/download.ts"),
+  "utf8",
+);
+if (!dl.includes("createEntitledMasterDownload") || !dl.includes("getUser")) {
+  fail("library download must require auth and entitlement helper");
+}
+if (
+  !dlHelper.includes("ENTITLEMENT_REQUIRED") ||
+  !dlHelper.includes("createSignedUrl")
+) {
+  fail("download helper must deny without entitlement then sign");
+}
+const dlCode = dl
+  .split("\n")
+  .filter((line) => !/^\s*(\*|\/\*|\*\/|\/\/)/.test(line.trim()) && !/^\s*\/\*/.test(line))
+  .filter((line) => !line.trim().startsWith("*"))
+  .join("\n");
+if (/\bmaster_path\b/.test(dlCode)) {
+  fail("download route must not expose master_path");
 }
 ok("library download fails closed");
+
+const checkout = readFileSync(
+  join(root, "src/app/(store)/checkout/page.tsx"),
+  "utf8",
+);
+if (checkout.includes("Place order (demo)") || checkout.includes("addPurchasesFromCart")) {
+  fail("demo checkout path must remain disabled");
+}
+ok("demo checkout disabled");
+
+const webhook = readFileSync(
+  join(root, "src/app/api/webhooks/razorpay/route.ts"),
+  "utf8",
+);
+if (
+  !webhook.includes("request.text()") ||
+  !webhook.includes("verifyWebhookSignature")
+) {
+  fail("razorpay webhook must verify raw-body signature");
+}
+ok("razorpay webhook signature verification present");
+
+const commerceMig = join(
+  root,
+  "supabase/migrations/20261028000000_commerce_orders_entitlements.sql",
+);
+if (!existsSync(commerceMig)) fail("commerce migration missing");
+const commerceMigSrc = readFileSync(commerceMig, "utf8");
+if (!commerceMigSrc.includes("fulfill_paid_order")) {
+  fail("commerce migration must define fulfill_paid_order RPC");
+}
+if (!commerceMigSrc.includes("processing_status")) {
+  fail("commerce migration must track payment_events.processing_status");
+}
+ok("commerce migration present");
+
+const fulfillSrc = readFileSync(
+  join(root, "src/lib/commerce/fulfill.ts"),
+  "utf8",
+);
+if (
+  !fulfillSrc.includes("isCapturedPaymentStatus") ||
+  !fulfillSrc.includes("paymentEventNeedsFulfillment")
+) {
+  fail("fulfill helpers must enforce capture-only + retryable events");
+}
+ok("capture-only fulfill helpers present");
 
 const phaseA = join(
   root,

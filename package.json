@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:security": "node scripts/security-smoke.mjs && npx tsx --test src/lib/security/__tests__/*.test.ts"
+    "test:security": "node scripts/security-smoke.mjs && npx tsx --test src/lib/security/__tests__/*.test.ts src/lib/commerce/__tests__/*.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Check, Copy, Download, Lock } from "lucide-react";
 import { useAdmin } from "@/admin/store/AdminProvider";
-import { resolveMediaAssetDisplayUrl } from "@/admin/lib/resolveAiImageMedia";
+import { resolvePublicPreviewUrl } from "@/admin/lib/resolveAiImageMedia";
 import { usePurchases } from "@/context/PurchaseContext";
 import { useCatalog } from "@/catalog/useCatalog";
 import type { AdminProduct, MediaAsset } from "@/admin/types";
@@ -139,37 +139,10 @@ export default function LibraryProductPage() {
           />
         )}
         {type === "VIDEO" && (
-          <div className="rounded-3xl border border-border bg-surface p-6">
-            <p className="text-sm text-muted">
-              Master downloads require server-verified purchase entitlements.
-              Client-side purchase state alone cannot unlock original files.
-            </p>
-            <button
-              type="button"
-              className="mt-4 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white"
-              onClick={async () => {
-                try {
-                  const res = await fetch("/api/library/download", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ productId }),
-                  });
-                  const data = (await res.json().catch(() => null)) as {
-                    error?: string;
-                  } | null;
-                  window.alert(
-                    data?.error ||
-                      "Download is unavailable until secure entitlements are enabled.",
-                  );
-                } catch {
-                  window.alert("Download request failed.");
-                }
-              }}
-            >
-              <Download size={16} />
-              Download video
-            </button>
-          </div>
+          <SecureMasterDownload
+            productId={productId}
+            label="Download video"
+          />
         )}
         {type === "BUNDLE" && publicProduct?.productType === "BUNDLE" && (
           <ul className="space-y-3">
@@ -285,6 +258,70 @@ function CaptionPackAccess({
   );
 }
 
+function SecureMasterDownload({
+  productId,
+  label,
+}: {
+  productId: string;
+  label: string;
+}) {
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div className="rounded-3xl border border-border bg-surface p-6">
+      <p className="text-sm text-muted">
+        Downloads require a signed-in account with a paid entitlement. Master
+        files are never exposed directly to the browser.
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        className="mt-4 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+        onClick={async () => {
+          setMessage(null);
+          setBusy(true);
+          try {
+            const res = await fetch("/api/library/download", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ productId }),
+            });
+            const data = (await res.json().catch(() => null)) as {
+              ok?: boolean;
+              error?: string;
+              downloadUrl?: string;
+              fileName?: string;
+            } | null;
+            if (!res.ok || !data?.ok || !data.downloadUrl) {
+              setMessage(
+                data?.error ||
+                  "Download is unavailable without a verified purchase.",
+              );
+              return;
+            }
+            const a = document.createElement("a");
+            a.href = data.downloadUrl;
+            a.download = data.fileName || "download";
+            a.rel = "noopener";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          } catch {
+            setMessage("Download request failed.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Download size={16} />
+        {busy ? "Preparing…" : label}
+      </button>
+      {message ? <p className="mt-3 text-sm text-muted">{message}</p> : null}
+    </div>
+  );
+}
+
 function AiImageAccess({
   product,
   products,
@@ -294,7 +331,7 @@ function AiImageAccess({
   products: AdminProduct[];
   mediaAssets: MediaAsset[];
 }) {
-  const downloadItems = (() => {
+  const previewItems = (() => {
     const colId = product.aiImageData?.collectionId;
     const isPack = Boolean(product.aiImageData?.isCollectionPack);
 
@@ -308,64 +345,52 @@ function AiImageAccess({
           )
         : [product];
 
-    return memberProducts
-      .map((p) => {
-        const asset = p.mediaAssetId
-          ? mediaAssets.find((a) => a.id === p.mediaAssetId)
-          : undefined;
-        const url = asset
-          ? resolveMediaAssetDisplayUrl(asset) || asset.master.url || ""
-          : "";
-        if (!url) return null;
-        return {
-          id: p.id,
-          url,
-          fileName:
-            asset?.originalFileName ||
-            asset?.master.fileName ||
-            `${p.slug || p.id}.jpg`,
-        };
-      })
-      .filter(Boolean) as Array<{ id: string; url: string; fileName: string }>;
+    return memberProducts.map((p) => {
+      const asset = p.mediaAssetId
+        ? mediaAssets.find((a) => a.id === p.mediaAssetId)
+        : undefined;
+      // Watermarked public preview only — never master
+      const previewUrl = asset ? resolvePublicPreviewUrl(asset) : "";
+      return {
+        id: p.id,
+        previewUrl,
+        label: asset?.originalFileName || p.name || p.id,
+      };
+    });
   })();
 
-  if (!downloadItems.length) {
-    return (
-      <p className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted">
-        Master image is not available for download yet. Re-open this page after
-        the media library finishes loading, or contact support if this persists.
-      </p>
-    );
-  }
-
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {downloadItems.map((image) => (
-        <figure
-          key={image.id}
-          className="overflow-hidden rounded-2xl border border-border bg-surface"
-        >
-          <div className="relative aspect-square">
-            <CoverImage
-              src={image.url}
-              alt={image.fileName}
-              fill
-              sizes="320px"
-            />
-          </div>
-          <figcaption className="flex items-center justify-between gap-2 p-3">
-            <span className="truncate text-xs text-muted">{image.fileName}</span>
-            <a
-              href={image.url}
-              download={image.fileName}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-accent"
-            >
-              <Download size={12} />
-              Download
-            </a>
-          </figcaption>
-        </figure>
-      ))}
+    <div className="space-y-6">
+      <SecureMasterDownload productId={product.id} label="Download master" />
+      {previewItems.some((i) => i.previewUrl) ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {previewItems.map((image) =>
+            image.previewUrl ? (
+              <figure
+                key={image.id}
+                className="overflow-hidden rounded-2xl border border-border bg-surface"
+              >
+                <div className="relative aspect-square">
+                  <CoverImage
+                    src={image.previewUrl}
+                    alt={image.label}
+                    fill
+                    sizes="320px"
+                  />
+                </div>
+                <figcaption className="p-3 text-xs text-muted">
+                  Preview only — use Download master for the original file.
+                </figcaption>
+              </figure>
+            ) : null,
+          )}
+        </div>
+      ) : (
+        <p className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted">
+          Preview thumbnail is not available yet. Master download still uses the
+          secure entitlement API when media is ready.
+        </p>
+      )}
     </div>
   );
 }
