@@ -1,11 +1,19 @@
 import { createServerClient } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+
+export type SessionUpdate = {
+  response: NextResponse;
+  user: User | null;
+};
 
 /**
  * Refresh the Supabase Auth session cookies on each matched request.
- * Does not enforce auth or change app routes.
+ * Returns the validated user (if any) for route gates — does not enforce alone.
  */
-export async function updateSession(request: NextRequest) {
+export async function updateSession(
+  request: NextRequest,
+): Promise<SessionUpdate> {
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -14,7 +22,7 @@ export async function updateSession(request: NextRequest) {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
-    return supabaseResponse;
+    return { response: supabaseResponse, user: null };
   }
 
   const supabase = createServerClient(url, anonKey, {
@@ -37,7 +45,9 @@ export async function updateSession(request: NextRequest) {
   });
 
   // Validates JWT when present; refreshes expired tokens via cookie handlers.
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return supabaseResponse;
+  return { response: supabaseResponse, user };
 }

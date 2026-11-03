@@ -39,6 +39,15 @@ describe("middleware admin gates", () => {
     assert.match(src, /\/api\/admin/);
     assert.match(src, /\/api\/tools\//);
   });
+
+  it("gates customer account, checkout, and library behind Supabase Auth", () => {
+    const src = readFileSync(join(root, "src/middleware.ts"), "utf8");
+    assert.match(src, /requiresCustomerAuth/);
+    assert.match(src, /\/signin/);
+    assert.match(src, /\/account/);
+    assert.match(src, /\/checkout/);
+    assert.match(src, /\/library\//);
+  });
 });
 
 describe("catalog never selects masters", () => {

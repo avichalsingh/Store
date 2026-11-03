@@ -16,9 +16,16 @@ function copyCookies(from: NextResponse, to: NextResponse): void {
   });
 }
 
+function requiresCustomerAuth(pathname: string): boolean {
+  if (pathname === "/account" || pathname.startsWith("/account/")) return true;
+  if (pathname === "/checkout" || pathname.startsWith("/checkout/")) return true;
+  if (pathname.startsWith("/library/")) return true;
+  return false;
+}
+
 export async function middleware(request: NextRequest) {
   // Keep Supabase auth cookies fresh (no-op if env vars are missing).
-  const supabaseResponse = await updateSession(request);
+  const { response: supabaseResponse, user } = await updateSession(request);
   const { pathname } = request.nextUrl;
 
   // Preserve existing CMS-port convenience redirect: :3020 / → /admin
@@ -70,6 +77,18 @@ export async function middleware(request: NextRequest) {
     );
     copyCookies(supabaseResponse, denied);
     return withSecurityHeaders(denied);
+  }
+
+  // Customer account + library require a Supabase Auth session.
+  if (requiresCustomerAuth(pathname) && !user) {
+    const signIn = request.nextUrl.clone();
+    signIn.pathname = "/signin";
+    const next =
+      pathname + (request.nextUrl.search ? request.nextUrl.search : "");
+    signIn.search = `?next=${encodeURIComponent(next)}`;
+    const redirect = NextResponse.redirect(signIn);
+    copyCookies(supabaseResponse, redirect);
+    return withSecurityHeaders(redirect);
   }
 
   applySecurityHeaders(supabaseResponse.headers);

@@ -17,7 +17,6 @@ import {
 } from "@/catalog/productTypes";
 import { CoverImage } from "@/components/ui/CoverImage";
 import { userOwnsProductId } from "@/catalog/contentPackMigration";
-import { mockPurchases } from "@/data/purchases";
 
 function CopyButton({
   text,
@@ -54,15 +53,11 @@ export default function LibraryProductPage() {
   const { products, mediaAssets, hydrated: adminHydrated } = useAdmin();
   const catalog = useCatalog();
 
-  const owned =
-    userOwnsProductId(
-      productId,
-      [
-        ...purchases.map((p) => p.productId),
-        ...mockPurchases.map((p) => p.productId),
-      ],
-    ) ||
-    mockPurchases.some((p) => p.productId === productId);
+  // Ownership for UI gating — download API still enforces server entitlements.
+  const owned = userOwnsProductId(
+    productId,
+    purchases.map((p) => p.productId),
+  );
 
   const adminProduct = useMemo(
     () => products.find((p) => p.id === productId),

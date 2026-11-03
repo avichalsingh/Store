@@ -79,21 +79,27 @@ export default function CheckoutPage() {
       try {
         const supabase = createClient();
         const { data } = await supabase.auth.getUser();
-        if (!cancelled) {
-          setUserEmail(data.user?.email ?? null);
-          setAuthReady(true);
+        if (cancelled) return;
+        const email = data.user?.email ?? null;
+        setUserEmail(email);
+        setAuthReady(true);
+        // Middleware also gates /checkout; this covers client navigations
+        // if the session is missing after hydration.
+        if (!email) {
+          router.replace(`/signin?next=${encodeURIComponent("/checkout")}`);
         }
       } catch {
         if (!cancelled) {
           setUserEmail(null);
           setAuthReady(true);
+          router.replace(`/signin?next=${encodeURIComponent("/checkout")}`);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   const onPay = useCallback(async () => {
     setError(null);
@@ -175,7 +181,7 @@ export default function CheckoutPage() {
         key: created.keyId,
         amount: amountPaise,
         currency: created.currency || "INR",
-        name: "Rhythm",
+        name: "PRAGVI",
         description: "Digital product purchase",
         order_id: created.razorpayOrderId,
         prefill: { email: userEmail },
@@ -241,15 +247,18 @@ export default function CheckoutPage() {
         prices.
       </div>
 
-      {!authReady ? null : !userEmail ? (
-        <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-text">
-          Sign in is required before payment. Use Supabase Auth on the account
-          page (magic link / email), then return here.
+      {!authReady ? (
+        <div className="mt-4 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
+          Checking session…
         </div>
-      ) : (
+      ) : userEmail ? (
         <div className="mt-4 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
           Signed in as{" "}
           <span className="font-medium text-text">{userEmail}</span>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
+          Redirecting to sign in…
         </div>
       )}
 
