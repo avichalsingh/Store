@@ -258,6 +258,9 @@ GRANT SELECT ON TABLE public.orders TO authenticated;
 GRANT SELECT ON TABLE public.order_items TO authenticated;
 GRANT SELECT ON TABLE public.entitlements TO authenticated;
 
+-- service_role table DML grants live in
+-- 20261103000000_commerce_service_role_grants.sql (idempotent; apply after this).
+
 COMMENT ON TABLE public.orders IS
   'Razorpay-backed checkout orders. Mutations via service-role API only.';
 COMMENT ON TABLE public.entitlements IS

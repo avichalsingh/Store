@@ -129,7 +129,20 @@ if (!commerceMigSrc.includes("fulfill_paid_order")) {
 if (!commerceMigSrc.includes("processing_status")) {
   fail("commerce migration must track payment_events.processing_status");
 }
-ok("commerce migration present");
+const serviceRoleGrantsMig = join(
+  root,
+  "supabase/migrations/20261103000000_commerce_service_role_grants.sql",
+);
+const grantsSrc = existsSync(serviceRoleGrantsMig)
+  ? readFileSync(serviceRoleGrantsMig, "utf8")
+  : "";
+const hasServiceRoleOrdersGrant =
+  commerceMigSrc.includes("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.orders TO service_role") ||
+  grantsSrc.includes("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.orders TO service_role");
+if (!hasServiceRoleOrdersGrant) {
+  fail("commerce migrations must GRANT DML on orders to service_role");
+}
+ok("commerce migration present (incl. service_role grants)");
 
 const fulfillSrc = readFileSync(
   join(root, "src/lib/commerce/fulfill.ts"),
