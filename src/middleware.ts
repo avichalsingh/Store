@@ -5,8 +5,11 @@ import { updateSession } from "@/lib/supabase/middleware";
 
 const CMS_PORT = "3020";
 
-function withSecurityHeaders(response: NextResponse): NextResponse {
-  applySecurityHeaders(response.headers);
+function withSecurityHeaders(
+  response: NextResponse,
+  pathname: string,
+): NextResponse {
+  applySecurityHeaders(response.headers, { pathname });
   return response;
 }
 
@@ -36,7 +39,7 @@ export async function middleware(request: NextRequest) {
       const protocol = request.nextUrl.protocol || "http:";
       const redirect = NextResponse.redirect(`${protocol}//${host}/admin`);
       copyCookies(supabaseResponse, redirect);
-      return withSecurityHeaders(redirect);
+      return withSecurityHeaders(redirect, pathname);
     }
   }
 
@@ -51,7 +54,7 @@ export async function middleware(request: NextRequest) {
       login.search = "";
       const redirect = NextResponse.redirect(login);
       copyCookies(supabaseResponse, redirect);
-      return withSecurityHeaders(redirect);
+      return withSecurityHeaders(redirect, pathname);
     }
   }
 
@@ -65,7 +68,7 @@ export async function middleware(request: NextRequest) {
         { status: 401 },
       );
       copyCookies(supabaseResponse, denied);
-      return withSecurityHeaders(denied);
+      return withSecurityHeaders(denied, pathname);
     }
   }
 
@@ -76,7 +79,7 @@ export async function middleware(request: NextRequest) {
       { status: 401 },
     );
     copyCookies(supabaseResponse, denied);
-    return withSecurityHeaders(denied);
+    return withSecurityHeaders(denied, pathname);
   }
 
   // Customer account + library require a Supabase Auth session.
@@ -88,10 +91,10 @@ export async function middleware(request: NextRequest) {
     signIn.search = `?next=${encodeURIComponent(next)}`;
     const redirect = NextResponse.redirect(signIn);
     copyCookies(supabaseResponse, redirect);
-    return withSecurityHeaders(redirect);
+    return withSecurityHeaders(redirect, pathname);
   }
 
-  applySecurityHeaders(supabaseResponse.headers);
+  applySecurityHeaders(supabaseResponse.headers, { pathname });
   return supabaseResponse;
 }
 

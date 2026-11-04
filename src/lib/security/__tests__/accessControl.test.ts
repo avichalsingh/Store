@@ -63,6 +63,58 @@ describe("CSP allows Razorpay Checkout without blanket wildcards", () => {
   });
 });
 
+describe("COOP allows Razorpay bank-auth popups only on checkout", () => {
+  it("defaults to same-origin and relaxes only checkout documents", async () => {
+    const {
+      COOP_CHECKOUT,
+      COOP_DEFAULT,
+      SECURITY_HEADERS,
+      applySecurityHeaders,
+      isCheckoutDocumentPath,
+      resolveCrossOriginOpenerPolicy,
+    } = await import("../headers");
+
+    assert.equal(COOP_DEFAULT, "same-origin");
+    assert.equal(COOP_CHECKOUT, "same-origin-allow-popups");
+    assert.equal(
+      SECURITY_HEADERS["Cross-Origin-Opener-Policy"],
+      "same-origin",
+    );
+    assert.equal(isCheckoutDocumentPath("/checkout"), true);
+    assert.equal(isCheckoutDocumentPath("/checkout/"), true);
+    assert.equal(isCheckoutDocumentPath("/account"), false);
+    assert.equal(isCheckoutDocumentPath("/api/checkout/create-order"), false);
+    assert.equal(resolveCrossOriginOpenerPolicy("/checkout"), COOP_CHECKOUT);
+    assert.equal(resolveCrossOriginOpenerPolicy("/"), COOP_DEFAULT);
+
+    const checkoutHeaders = new Headers();
+    applySecurityHeaders(checkoutHeaders, { pathname: "/checkout" });
+    assert.equal(
+      checkoutHeaders.get("Cross-Origin-Opener-Policy"),
+      "same-origin-allow-popups",
+    );
+    // CSP must remain intact when COOP is overridden for checkout.
+    assert.match(
+      checkoutHeaders.get("Content-Security-Policy") || "",
+      /https:\/\/\*\.razorpay\.com/,
+    );
+
+    const homeHeaders = new Headers();
+    applySecurityHeaders(homeHeaders, { pathname: "/" });
+    assert.equal(
+      homeHeaders.get("Cross-Origin-Opener-Policy"),
+      "same-origin",
+    );
+  });
+
+  it("middleware applies security headers with pathname for COOP scoping", () => {
+    const src = readFileSync(join(root, "src/middleware.ts"), "utf8");
+    assert.match(src, /applySecurityHeaders\([^,]+,\s*\{\s*pathname\s*\}/);
+    assert.match(src, /withSecurityHeaders\([^,]+,\s*pathname\)/);
+    assert.doesNotMatch(src, /Cross-Origin-Embedder-Policy/);
+  });
+});
+
 describe("auth callback", () => {
   it("exchanges PKCE code and verifies email OTP token_hash safely", () => {
     const src = readFileSync(

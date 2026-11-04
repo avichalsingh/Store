@@ -72,6 +72,27 @@ if (!cspHeaders.includes("frame-src") || !cspHeaders.includes("RAZORPAY_HOST")) 
 }
 ok("CSP allows Razorpay Checkout origins");
 
+if (!cspHeaders.includes('COOP_DEFAULT = "same-origin"')) {
+  fail("default COOP must remain same-origin");
+}
+if (!cspHeaders.includes('COOP_CHECKOUT = "same-origin-allow-popups"')) {
+  fail("checkout COOP must be same-origin-allow-popups for Razorpay popups");
+}
+if (!cspHeaders.includes("isCheckoutDocumentPath") || !cspHeaders.includes("resolveCrossOriginOpenerPolicy")) {
+  fail("COOP must be path-scoped via checkout helpers");
+}
+if (cspHeaders.includes("Cross-Origin-Embedder-Policy")) {
+  fail("must not set Cross-Origin-Embedder-Policy (would break Checkout isolation)");
+}
+if (
+  !mw.includes("applySecurityHeaders") ||
+  !mw.includes("{ pathname }") ||
+  !mw.includes("withSecurityHeaders(redirect, pathname)")
+) {
+  fail("middleware must pass pathname into security headers for checkout COOP");
+}
+ok("COOP is same-origin site-wide and same-origin-allow-popups on /checkout");
+
 
 const workerIndex = readFileSync(join(root, "worker/src/index.ts"), "utf8");
 if (!workerIndex.includes("MEDIA_MASTERS_BUCKET") || !workerIndex.includes("..")) {

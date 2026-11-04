@@ -8,12 +8,41 @@
  */
 const RAZORPAY_HOST = "https://*.razorpay.com";
 
+/**
+ * Site-wide COOP — isolates the browsing context group to same-origin documents.
+ * Do not relax globally; payment popups need a path-scoped exception (below).
+ */
+export const COOP_DEFAULT = "same-origin";
+
+/**
+ * Checkout document COOP for Razorpay Standard Checkout.
+ * Card / netbanking bank-auth uses Window.open() to a cross-origin page that
+ * typically has no COOP (unsafe-none). With COOP `same-origin`, that popup is
+ * process-isolated and the opener relationship is severed — browsers leave the
+ * window at about:blank after mocksharp returns callback_url.
+ * `same-origin-allow-popups` keeps isolation for navigations while allowing
+ * Window.open() to unsafe-none targets (MDN: payments / OAuth).
+ */
+export const COOP_CHECKOUT = "same-origin-allow-popups";
+
+/** Storefront document that hosts Razorpay Checkout (opens bank-auth popups). */
+export function isCheckoutDocumentPath(pathname: string): boolean {
+  return pathname === "/checkout" || pathname.startsWith("/checkout/");
+}
+
+export function resolveCrossOriginOpenerPolicy(pathname?: string): string {
+  if (pathname && isCheckoutDocumentPath(pathname)) {
+    return COOP_CHECKOUT;
+  }
+  return COOP_DEFAULT;
+}
+
 export const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Opener-Policy": COOP_DEFAULT,
   // Compatible baseline CSP — allows Next/Turbopack inline and Supabase media.
   "Content-Security-Policy": [
     "default-src 'self'",
@@ -34,8 +63,15 @@ export const SECURITY_HEADERS: Record<string, string> = {
   ].join("; "),
 };
 
-export function applySecurityHeaders(headers: Headers): void {
+export function applySecurityHeaders(
+  headers: Headers,
+  options?: { pathname?: string },
+): void {
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
     headers.set(key, value);
   }
+  headers.set(
+    "Cross-Origin-Opener-Policy",
+    resolveCrossOriginOpenerPolicy(options?.pathname),
+  );
 }
