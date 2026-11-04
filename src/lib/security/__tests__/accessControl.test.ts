@@ -63,14 +63,14 @@ describe("CSP allows Razorpay Checkout without blanket wildcards", () => {
   });
 });
 
-describe("COOP allows Razorpay bank-auth popups only on checkout", () => {
-  it("defaults to same-origin and relaxes only checkout documents", async () => {
+describe("COOP allows Razorpay bank-auth popups on checkout-flow documents", () => {
+  it("relaxes COOP on /, /signin, /cart, /checkout and keeps same-origin elsewhere", async () => {
     const {
       COOP_CHECKOUT,
       COOP_DEFAULT,
       SECURITY_HEADERS,
       applySecurityHeaders,
-      isCheckoutDocumentPath,
+      isCheckoutFlowDocumentPath,
       resolveCrossOriginOpenerPolicy,
     } = await import("../headers");
 
@@ -80,31 +80,60 @@ describe("COOP allows Razorpay bank-auth popups only on checkout", () => {
       SECURITY_HEADERS["Cross-Origin-Opener-Policy"],
       "same-origin",
     );
-    assert.equal(isCheckoutDocumentPath("/checkout"), true);
-    assert.equal(isCheckoutDocumentPath("/checkout/"), true);
-    assert.equal(isCheckoutDocumentPath("/account"), false);
-    assert.equal(isCheckoutDocumentPath("/api/checkout/create-order"), false);
-    assert.equal(resolveCrossOriginOpenerPolicy("/checkout"), COOP_CHECKOUT);
-    assert.equal(resolveCrossOriginOpenerPolicy("/"), COOP_DEFAULT);
 
-    const checkoutHeaders = new Headers();
-    applySecurityHeaders(checkoutHeaders, { pathname: "/checkout" });
-    assert.equal(
-      checkoutHeaders.get("Cross-Origin-Opener-Policy"),
-      "same-origin-allow-popups",
-    );
-    // CSP must remain intact when COOP is overridden for checkout.
-    assert.match(
-      checkoutHeaders.get("Content-Security-Policy") || "",
-      /https:\/\/\*\.razorpay\.com/,
-    );
+    // Pathname resolver receives pathname only (no query); cover real route shapes.
+    for (const pathname of [
+      "/",
+      "/signin",
+      "/cart",
+      "/cart/",
+      "/checkout",
+      "/checkout/",
+    ]) {
+      assert.equal(isCheckoutFlowDocumentPath(pathname), true, pathname);
+      assert.equal(
+        resolveCrossOriginOpenerPolicy(pathname),
+        COOP_CHECKOUT,
+        pathname,
+      );
+      const headers = new Headers();
+      applySecurityHeaders(headers, { pathname });
+      assert.equal(
+        headers.get("Cross-Origin-Opener-Policy"),
+        "same-origin-allow-popups",
+        pathname,
+      );
+      // CSP must remain intact when COOP is overridden for checkout flow.
+      assert.match(
+        headers.get("Content-Security-Policy") || "",
+        /https:\/\/\*\.razorpay\.com/,
+      );
+    }
 
-    const homeHeaders = new Headers();
-    applySecurityHeaders(homeHeaders, { pathname: "/" });
-    assert.equal(
-      homeHeaders.get("Cross-Origin-Opener-Policy"),
-      "same-origin",
-    );
+    const retainDefaultPaths = [
+      "/account",
+      "/admin",
+      "/admin/login",
+      "/videos",
+      "/api/checkout/create-order",
+      "/api/catalog",
+      "/library/foo",
+    ];
+    for (const pathname of retainDefaultPaths) {
+      assert.equal(isCheckoutFlowDocumentPath(pathname), false, pathname);
+      assert.equal(
+        resolveCrossOriginOpenerPolicy(pathname),
+        COOP_DEFAULT,
+        pathname,
+      );
+      const headers = new Headers();
+      applySecurityHeaders(headers, { pathname });
+      assert.equal(
+        headers.get("Cross-Origin-Opener-Policy"),
+        "same-origin",
+        pathname,
+      );
+    }
   });
 
   it("middleware applies security headers with pathname for COOP scoping", () => {

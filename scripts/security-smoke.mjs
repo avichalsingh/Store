@@ -76,10 +76,18 @@ if (!cspHeaders.includes('COOP_DEFAULT = "same-origin"')) {
   fail("default COOP must remain same-origin");
 }
 if (!cspHeaders.includes('COOP_CHECKOUT = "same-origin-allow-popups"')) {
-  fail("checkout COOP must be same-origin-allow-popups for Razorpay popups");
+  fail("checkout-flow COOP must be same-origin-allow-popups for Razorpay popups");
 }
-if (!cspHeaders.includes("isCheckoutDocumentPath") || !cspHeaders.includes("resolveCrossOriginOpenerPolicy")) {
-  fail("COOP must be path-scoped via checkout helpers");
+if (
+  !cspHeaders.includes("isCheckoutFlowDocumentPath") ||
+  !cspHeaders.includes("resolveCrossOriginOpenerPolicy")
+) {
+  fail("COOP must be path-scoped via checkout-flow helpers");
+}
+for (const marker of ['pathname === "/"', '"/signin"', '"/cart"', '"/checkout"']) {
+  if (!cspHeaders.includes(marker)) {
+    fail(`checkout-flow COOP must include storefront path ${marker}`);
+  }
 }
 if (cspHeaders.includes("Cross-Origin-Embedder-Policy")) {
   fail("must not set Cross-Origin-Embedder-Policy (would break Checkout isolation)");
@@ -91,7 +99,7 @@ if (
 ) {
   fail("middleware must pass pathname into security headers for checkout COOP");
 }
-ok("COOP is same-origin site-wide and same-origin-allow-popups on /checkout");
+ok("COOP is same-origin-allow-popups on /, /signin, /cart, /checkout; same-origin elsewhere");
 
 
 const workerIndex = readFileSync(join(root, "worker/src/index.ts"), "utf8");
