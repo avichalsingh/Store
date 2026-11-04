@@ -1,4 +1,4 @@
-# RHYTHM
+# PRAGVI
 
 Premium digital storefront for AI-generated character dance videos.
 
@@ -25,6 +25,97 @@ Open [http://localhost:3000](http://localhost:3000).
 - `npm run build` — production build
 - `npm start` — serve production build
 - `npm run lint` — ESLint
+- `npm run catalog:export-prod` — read-only Production catalogue export
+- `npm run catalog:import-staging` — Staging import (**dry-run by default**)
+- `npm run catalog:copy-previews` — copy `media-previews` objects only (**dry-run by default**)
+
+## Production → Staging catalogue transfer
+
+Safe, repeatable workflow to copy **catalogue** data (not customers, orders, or payments) from Production into the separate `pragvi-staging` Supabase project. Product/character IDs are preserved.
+
+### What is copied
+
+Tables (in order): `characters` → `products` → `collections` → `collection_products` → `collection_character_rules` → `product_relationships` → `media_assets`.
+
+Storage (optional second step): referenced objects in **`media-previews` only**. **`media-masters` are never copied** by these scripts.
+
+### What is never copied
+
+`auth.users`, orders, order_items, payment_events, entitlements, secrets, or master downloadable files.
+
+### Environment setup
+
+Use two separate env files (both gitignored via `.env*`):
+
+| File | Purpose |
+|------|---------|
+| `.env.local` | Production URL + service role (export / preview source) |
+| `.env.staging` | Staging URL + service role (import / preview destination) |
+
+Required names in each file:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Optional: `CATALOG_PRODUCTION_PROJECT_REF` (production project ref) as an extra guard for import.
+
+**Never** point `.env.staging` at Production. Import aborts if staging and production project refs match.
+
+### Staging permissions prerequisite
+
+Staging `service_role` needs table GRANTs on catalogue tables (commerce grants alone are not enough). Migration prepared (not auto-applied):
+
+`supabase/migrations/20261104000000_staging_catalog_service_role_grants.sql`
+
+Apply **only** to `pragvi-staging` after explicit approval (`npx supabase db push` while linked to staging). Do **not** apply to Production without a separate decision.
+
+### 1) Read-only export (Production)
+
+```bash
+mkdir -p artifacts/catalog
+node scripts/catalog-export-prod.mjs --env-file .env.local --out artifacts/catalog/prod-export.json
+```
+
+Writes a manifest under `artifacts/catalog/` (gitignored). Review `counts`, `media.previewObjectCount`, and `media.unresolvedOrForeignSupabaseRefs` before importing.
+
+### 2) Dry-run import (default — no writes)
+
+```bash
+node scripts/catalog-import-staging.mjs --env-file .env.staging --in artifacts/catalog/prod-export.json
+```
+
+Reports planned inserts, ID conflicts, and URL rewrite stats. Aborts on:
+
+- staging ref == production ref
+- unresolved Production Supabase URLs that would leave Staging dependent on Production
+- existing staging rows with the same IDs (no silent overwrite)
+
+### 3) Dry-run preview copy (default — no storage writes)
+
+```bash
+node scripts/catalog-copy-previews.mjs --in artifacts/catalog/prod-export.json --prod-env .env.local --staging-env .env.staging
+```
+
+### 4) Execute only after human approval
+
+```bash
+# After staging catalogue grants are applied and dry-runs look correct:
+node scripts/catalog-import-staging.mjs --env-file .env.staging --in artifacts/catalog/prod-export.json --execute
+node scripts/catalog-copy-previews.mjs --in artifacts/catalog/prod-export.json --prod-env .env.local --staging-env .env.staging --execute
+```
+
+### 5) Verify Staging
+
+- `catalog_products` / `catalog_characters` row counts match expected actives
+- Spot-check that media URLs use the **staging** Supabase host (not Production)
+- Confirm downloads still require auth + entitlements (no masters copied)
+
+### Avoid targeting Production
+
+- Export reads `.env.local`; import defaults to `.env.staging`
+- Import compares project refs and refuses same-project or prod-as-staging
+- No script uses `--execute` by default
+- Masters bucket is rejected if it appears in the preview copy list
 
 ## Project structure
 

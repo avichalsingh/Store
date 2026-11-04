@@ -37,6 +37,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# catalogue transfer artifacts (may contain commercial catalog JSON)
+/artifacts/catalog/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

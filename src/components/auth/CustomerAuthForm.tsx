@@ -76,9 +76,18 @@ export function CustomerAuthForm({
           router.refresh();
           return;
         }
-        setInfo(
-          "Account created. Check your email to confirm, then sign in.",
-        );
+        // Unconfirmed signup (or existing unconfirmed email): no session until
+        // the confirmation / magic link hits /auth/callback.
+        const identities = data.user?.identities ?? [];
+        if (!data.user || identities.length === 0) {
+          setInfo(
+            "If an account already exists for this email, sign in instead. Otherwise check your email to confirm, then return here.",
+          );
+        } else {
+          setInfo(
+            "Account created. Check your email for a confirmation link — it returns you here after you confirm — then sign in.",
+          );
+        }
         setMode("signin");
         return;
       }

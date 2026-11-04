@@ -60,6 +60,19 @@ if (!mw.includes("/api/admin") || !mw.includes("isAdminCookieHeaderValidEdge")) 
 if (!mw.includes("/admin/login")) fail("middleware must exempt /admin/login");
 ok("middleware admin gates present");
 
+const cspHeaders = readFileSync(join(root, "src/lib/security/headers.ts"), "utf8");
+if (!cspHeaders.includes("https://*.razorpay.com")) {
+  fail("CSP must allow Razorpay Checkout hosts (https://*.razorpay.com)");
+}
+if (!cspHeaders.includes("script-src") || !cspHeaders.includes("${RAZORPAY_HOST}")) {
+  fail("CSP script-src must include Razorpay host constant for checkout.js");
+}
+if (!cspHeaders.includes("frame-src") || !cspHeaders.includes("RAZORPAY_HOST")) {
+  fail("CSP frame-src must include Razorpay hosts for Checkout modal");
+}
+ok("CSP allows Razorpay Checkout origins");
+
+
 const workerIndex = readFileSync(join(root, "worker/src/index.ts"), "utf8");
 if (!workerIndex.includes("MEDIA_MASTERS_BUCKET") || !workerIndex.includes("..")) {
   fail("worker must validate master bucket/path");

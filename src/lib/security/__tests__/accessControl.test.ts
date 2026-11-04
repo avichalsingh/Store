@@ -50,6 +50,43 @@ describe("middleware admin gates", () => {
   });
 });
 
+describe("CSP allows Razorpay Checkout without blanket wildcards", () => {
+  it("includes Razorpay hosts in script-src, frame-src, and connect-src", async () => {
+    const { SECURITY_HEADERS } = await import("../headers");
+    const csp = SECURITY_HEADERS["Content-Security-Policy"];
+    assert.match(csp, /script-src[^;]*https:\/\/\*\.razorpay\.com/);
+    assert.match(csp, /frame-src[^;]*https:\/\/\*\.razorpay\.com/);
+    assert.match(csp, /connect-src[^;]*https:\/\/\*\.razorpay\.com/);
+    // No scheme-wide / universal script allowlist.
+    assert.doesNotMatch(csp, /script-src[^;]* https:(;|$)/);
+    assert.doesNotMatch(csp, /script-src[^;]* \*(;|$)/);
+  });
+});
+
+describe("auth callback", () => {
+  it("exchanges PKCE code and verifies email OTP token_hash safely", () => {
+    const src = readFileSync(
+      join(root, "src/app/auth/callback/route.ts"),
+      "utf8",
+    );
+    assert.match(src, /exchangeCodeForSession/);
+    assert.match(src, /verifyOtp/);
+    assert.match(src, /token_hash/);
+    assert.match(src, /safeNextPath/);
+    assert.match(src, /\/signin/);
+    assert.doesNotMatch(src, /SERVICE_ROLE|createServiceClient/);
+  });
+
+  it("checkout returns customers to sign-in with next=/checkout", () => {
+    const src = readFileSync(
+      join(root, "src/app/(store)/checkout/page.tsx"),
+      "utf8",
+    );
+    assert.match(src, /\/signin\?next=/);
+    assert.match(src, /\/checkout/);
+  });
+});
+
 describe("catalog never selects masters", () => {
   it("catalog API selects only public media_assets fields", () => {
     const src = readFileSync(
