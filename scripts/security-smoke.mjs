@@ -75,31 +75,37 @@ ok("CSP allows Razorpay Checkout origins");
 if (!cspHeaders.includes('COOP_DEFAULT = "same-origin"')) {
   fail("default COOP must remain same-origin");
 }
-if (!cspHeaders.includes('COOP_CHECKOUT = "same-origin-allow-popups"')) {
-  fail("checkout-flow COOP must be same-origin-allow-popups for Razorpay popups");
+if (!cspHeaders.includes('COOP_STOREFRONT = "same-origin-allow-popups"')) {
+  fail("storefront COOP must be same-origin-allow-popups for Razorpay popups");
 }
 if (
-  !cspHeaders.includes("isCheckoutFlowDocumentPath") ||
+  !cspHeaders.includes("isStorefrontDocumentPath") ||
   !cspHeaders.includes("resolveCrossOriginOpenerPolicy")
 ) {
-  fail("COOP must be path-scoped via checkout-flow helpers");
+  fail("COOP must be path-scoped via storefront document helpers");
 }
-for (const marker of ['pathname === "/"', '"/signin"', '"/cart"', '"/checkout"']) {
+for (const marker of ['"/admin"', '"/api"', '"/auth"']) {
   if (!cspHeaders.includes(marker)) {
-    fail(`checkout-flow COOP must include storefront path ${marker}`);
+    fail(`storefront COOP deny-list must exclude ${marker}`);
   }
 }
 if (cspHeaders.includes("Cross-Origin-Embedder-Policy")) {
   fail("must not set Cross-Origin-Embedder-Policy (would break Checkout isolation)");
 }
 if (
+  /COOP_[A-Z]+\s*=\s*["']unsafe-none["']/.test(cspHeaders) ||
+  /Cross-Origin-Opener-Policy["']\s*:\s*["']unsafe-none["']/.test(cspHeaders)
+) {
+  fail("must not configure COOP as unsafe-none");
+}
+if (
   !mw.includes("applySecurityHeaders") ||
   !mw.includes("{ pathname }") ||
   !mw.includes("withSecurityHeaders(redirect, pathname)")
 ) {
-  fail("middleware must pass pathname into security headers for checkout COOP");
+  fail("middleware must pass pathname into security headers for COOP scoping");
 }
-ok("COOP is same-origin-allow-popups on /, /signin, /cart, /checkout; same-origin elsewhere");
+ok("COOP is same-origin-allow-popups on storefront docs; same-origin on admin/api/auth");
 
 
 const workerIndex = readFileSync(join(root, "worker/src/index.ts"), "utf8");

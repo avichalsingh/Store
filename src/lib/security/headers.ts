@@ -9,13 +9,13 @@
 const RAZORPAY_HOST = "https://*.razorpay.com";
 
 /**
- * Site-wide COOP — isolates the browsing context group to same-origin documents.
- * Do not relax globally; payment popups need a path-scoped exception (below).
+ * Default COOP for non-storefront surfaces (admin UI, APIs, auth callbacks).
+ * Keeps browsing-context isolation; do not relax these to allow-popups.
  */
 export const COOP_DEFAULT = "same-origin";
 
 /**
- * Checkout-flow document COOP for Razorpay Standard Checkout.
+ * Storefront document COOP for Razorpay Standard Checkout.
  * Card / netbanking bank-auth uses Window.open() to a cross-origin page that
  * typically has no COOP (unsafe-none). With COOP `same-origin`, that popup is
  * process-isolated and the opener relationship is severed — browsers leave the
@@ -23,31 +23,30 @@ export const COOP_DEFAULT = "same-origin";
  * `same-origin-allow-popups` keeps isolation for navigations while allowing
  * Window.open() to unsafe-none targets (MDN: payments / OAuth).
  *
- * Must cover documents that can soft-navigate into checkout (App Router does not
- * re-apply COOP on client transitions): `/`, `/signin`, `/cart`, `/checkout`.
+ * Applied to all public storefront HTML documents (not an allowlist of a few
+ * paths): App Router soft-nav from /videos, /explore, PDPs, etc. into /checkout
+ * retains the opener document's COOP. Admin / API / auth stay on COOP_DEFAULT.
  */
-export const COOP_CHECKOUT = "same-origin-allow-popups";
+export const COOP_STOREFRONT = "same-origin-allow-popups";
 
 function matchesPathOrPrefix(pathname: string, base: string): boolean {
   return pathname === base || pathname.startsWith(`${base}/`);
 }
 
 /**
- * Storefront documents that may initiate or soft-navigate into Razorpay Checkout.
- * Unrelated routes keep COOP_DEFAULT.
+ * Storefront HTML documents (browse, PDP, cart drawer hosts, checkout, account).
+ * Exclude privileged / non-document namespaces that must keep COOP_DEFAULT.
  */
-export function isCheckoutFlowDocumentPath(pathname: string): boolean {
-  if (pathname === "/") return true;
-  return (
-    matchesPathOrPrefix(pathname, "/signin") ||
-    matchesPathOrPrefix(pathname, "/cart") ||
-    matchesPathOrPrefix(pathname, "/checkout")
-  );
+export function isStorefrontDocumentPath(pathname: string): boolean {
+  if (matchesPathOrPrefix(pathname, "/admin")) return false;
+  if (matchesPathOrPrefix(pathname, "/api")) return false;
+  if (matchesPathOrPrefix(pathname, "/auth")) return false;
+  return true;
 }
 
 export function resolveCrossOriginOpenerPolicy(pathname?: string): string {
-  if (pathname && isCheckoutFlowDocumentPath(pathname)) {
-    return COOP_CHECKOUT;
+  if (pathname && isStorefrontDocumentPath(pathname)) {
+    return COOP_STOREFRONT;
   }
   return COOP_DEFAULT;
 }
