@@ -665,6 +665,110 @@ describe("commerce routes and migration", () => {
     assert.match(route, /createEntitledMasterDownload/);
   });
 
+  it("account purchases API reads entitlements for the signed-in user", () => {
+    const route = readFileSync(
+      join(root, "src/app/api/account/purchases/route.ts"),
+      "utf8",
+    );
+    assert.match(route, /getUser/);
+    assert.match(route, /from\("entitlements"\)/);
+    assert.match(route, /AUTH_REQUIRED/);
+    assert.match(route, /catalog_products/);
+    assert.doesNotMatch(route, /localStorage|addPurchasesFromCart/);
+  });
+
+  it("purchase context loads from account purchases API after verify", () => {
+    const ctx = readFileSync(
+      join(root, "src/context/PurchaseContext.tsx"),
+      "utf8",
+    );
+    const checkout = readFileSync(
+      join(root, "src/app/(store)/checkout/page.tsx"),
+      "utf8",
+    );
+    assert.match(ctx, /\/api\/account\/purchases/);
+    assert.match(ctx, /refreshPurchases/);
+    assert.match(ctx, /onAuthStateChange/);
+    assert.match(ctx, /SIGNED_OUT/);
+    assert.doesNotMatch(ctx, /rhythm-purchases-v1/);
+    assert.match(checkout, /refreshPurchases/);
+    assert.match(checkout, /verify-payment/);
+    assert.doesNotMatch(checkout, /addPurchasesFromCart/);
+  });
+
+  it("mapEntitlementsToPurchases builds library cards from catalog rows", async () => {
+    const { mapEntitlementsToPurchases } = await import("../purchases");
+    const items = mapEntitlementsToPurchases(
+      [
+        {
+          id: "ent-1",
+          product_id: "vid-001",
+          created_at: "2026-11-05T10:00:00.000Z",
+        },
+        {
+          id: "ent-2",
+          product_id: "col-001",
+          created_at: "2026-11-05T11:00:00.000Z",
+        },
+        {
+          id: "ent-3",
+          product_id: "img-001",
+          created_at: "2026-11-05T11:30:00.000Z",
+        },
+      ],
+      [
+        {
+          id: "vid-001",
+          name: "Neon Dance",
+          character_name: "Ava",
+          product_type: "VIDEO",
+          media: { thumbnail: "https://example.com/t.jpg" },
+        },
+        {
+          id: "col-001",
+          name: "Pack",
+          character_name: null,
+          product_type: "COLLECTION",
+          media: null,
+        },
+        {
+          id: "img-001",
+          name: "Still",
+          character_name: "Ava",
+          product_type: "AI_IMAGE",
+          media: { thumbnail: "https://example.com/i.jpg" },
+        },
+      ],
+    );
+    assert.equal(items.length, 3);
+    assert.equal(items[0]?.productType, "VIDEO");
+    assert.equal(items[0]?.type, "video");
+    assert.equal(items[1]?.productType, "COLLECTION");
+    assert.equal(items[1]?.type, "collection");
+    assert.equal(items[2]?.productType, "AI_IMAGE");
+    assert.equal(items[2]?.type, "product");
+  });
+
+  it("orphan entitlement (missing catalog row) does not map as video", async () => {
+    const { mapEntitlementsToPurchases } = await import("../purchases");
+    const items = mapEntitlementsToPurchases(
+      [
+        {
+          id: "ent-orphan",
+          product_id: "missing-product-id",
+          created_at: "2026-11-05T12:00:00.000Z",
+        },
+      ],
+      [],
+    );
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.productId, "missing-product-id");
+    assert.equal(items[0]?.productType, "PRODUCT");
+    assert.equal(items[0]?.type, "product");
+    assert.notEqual(items[0]?.type, "video");
+    assert.notEqual(items[0]?.productType, "VIDEO");
+  });
+
   it("commerce migration still has fulfill RPC + processing_status", () => {
     const mig = readFileSync(
       join(

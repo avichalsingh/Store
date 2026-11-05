@@ -151,7 +151,38 @@ const checkout = readFileSync(
 if (checkout.includes("Place order (demo)") || checkout.includes("addPurchasesFromCart")) {
   fail("demo checkout path must remain disabled");
 }
+if (!checkout.includes("refreshPurchases") || !checkout.includes("verify-payment")) {
+  fail("checkout must refresh server purchases after verified payment");
+}
 ok("demo checkout disabled");
+
+const accountPurchases = readFileSync(
+  join(root, "src/app/api/account/purchases/route.ts"),
+  "utf8",
+);
+if (
+  !accountPurchases.includes("getUser") ||
+  !accountPurchases.includes('from("entitlements")')
+) {
+  fail("account purchases API must require auth and read entitlements");
+}
+const purchaseCtx = readFileSync(
+  join(root, "src/context/PurchaseContext.tsx"),
+  "utf8",
+);
+if (
+  !purchaseCtx.includes("/api/account/purchases") ||
+  purchaseCtx.includes("rhythm-purchases-v1")
+) {
+  fail("PurchaseContext must load from entitlements API, not localStorage");
+}
+if (
+  !purchaseCtx.includes("onAuthStateChange") ||
+  !purchaseCtx.includes("SIGNED_OUT")
+) {
+  fail("PurchaseContext must clear purchases on sign-out / account switch");
+}
+ok("account purchases load from verified entitlements");
 
 const webhook = readFileSync(
   join(root, "src/app/api/webhooks/razorpay/route.ts"),

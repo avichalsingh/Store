@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useCart } from "@/context/CartContext";
+import { usePurchases } from "@/context/PurchaseContext";
 import { useCatalog } from "@/catalog/useCatalog";
 import { formatPrice } from "@/lib/pricing";
 import {
@@ -61,6 +62,7 @@ function loadRazorpayScript(): Promise<boolean> {
 
 export default function CheckoutPage() {
   const { items, clearCart } = useCart();
+  const { refreshPurchases } = usePurchases();
   const catalog = useCatalog();
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -208,6 +210,9 @@ export default function CheckoutPage() {
               );
               return;
             }
+            // Entitlements are created server-side in verify-payment; refresh
+            // Account/Library from that source of truth (never trust client-only).
+            await refreshPurchases();
             clearCart();
             router.push("/account");
           } catch {
@@ -225,7 +230,15 @@ export default function CheckoutPage() {
       setError("Checkout failed");
       setBusy(false);
     }
-  }, [userEmail, paymentsConfigured, items, inrTotal, clearCart, router]);
+  }, [
+    userEmail,
+    paymentsConfigured,
+    items,
+    inrTotal,
+    clearCart,
+    refreshPurchases,
+    router,
+  ]);
 
   return (
     <div className="mx-auto max-w-3xl px-4 pb-20 pt-28 sm:px-6 lg:px-8">

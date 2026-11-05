@@ -55,7 +55,7 @@ export default function AccountPage() {
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("library");
   const [filter, setFilter] = useState<FilterId>("all");
-  const { purchases, hydrated } = usePurchases();
+  const { purchases, hydrated, refreshPurchases } = usePurchases();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -71,6 +71,9 @@ export default function AccountPage() {
           setUserEmail(data.user?.email ?? null);
           setAuthReady(true);
         }
+        // Always refresh: signed-in → replace with that user's entitlements;
+        // signed-out → API 401 clears the list (no cross-account leakage).
+        await refreshPurchases();
       } catch {
         if (!cancelled) {
           setUserEmail(null);
@@ -81,7 +84,7 @@ export default function AccountPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshPurchases]);
 
   const libraryItems = useMemo(() => {
     if (filter === "all") return purchases;
@@ -99,6 +102,8 @@ export default function AccountPage() {
         return;
       }
       setUserEmail(null);
+      // Auth listener also clears; refresh ensures purchases are empty before leave.
+      await refreshPurchases();
       router.replace("/signin");
       router.refresh();
     } catch {
@@ -257,7 +262,9 @@ export default function AccountPage() {
           {tab === "purchases" && (
             <div>
               <h2 className="font-display text-2xl font-bold">Purchases</h2>
-              {purchases.length === 0 ? (
+              {!hydrated ? (
+                <div className="mt-6 h-40 animate-pulse rounded-2xl bg-surface-2" />
+              ) : purchases.length === 0 ? (
                 <div className="mt-6 rounded-3xl border border-dashed border-border p-10 text-center">
                   <p className="font-display text-xl font-bold">No purchases yet</p>
                   <Link
