@@ -60,6 +60,27 @@ export default function AccountPage() {
   const [authReady, setAuthReady] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
+  const [downloadBusyId, setDownloadBusyId] = useState<string | null>(null);
+  const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
+
+  async function onLibraryDownload(productId: string) {
+    if (downloadBusyId) return;
+    setDownloadMessage(null);
+    setDownloadBusyId(productId);
+    try {
+      const { requestAndStartMasterDownload } = await import(
+        "@/lib/commerce/clientMasterDownload"
+      );
+      const result = await requestAndStartMasterDownload(productId);
+      if (!result.ok) {
+        setDownloadMessage(result.error);
+      }
+    } catch {
+      setDownloadMessage("Download request failed.");
+    } finally {
+      setDownloadBusyId(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -215,46 +236,78 @@ export default function AccountPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                  {libraryItems.map((item) => {
-                    const productType = resolveProductType(item);
-                    const typeLabel = isProductType(productType)
-                      ? PRODUCT_TYPE_CONFIG[productType as ProductType].singular
-                      : productType === "COLLECTION"
-                        ? "Collection"
-                        : productType;
-                    const href =
-                      item.type === "collection"
-                        ? `/collections/${item.productId}`
-                        : `/library/${item.productId}`;
-                    return (
-                      <article key={item.id} className="group">
-                        <div className="relative aspect-[9/16] overflow-hidden rounded-2xl ring-1 ring-border">
-                          <CoverImage
-                            src={item.thumbnail}
-                            alt=""
-                            fill
-                            sizes="200px"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
-                          <Link
-                            href={href}
-                            className="absolute bottom-3 left-3 right-3 rounded-full bg-white/15 py-2 text-center text-xs font-semibold text-white backdrop-blur-md transition hover:bg-accent"
-                          >
-                            {libraryCta(productType)}
-                          </Link>
-                        </div>
-                        <p className="mt-3 text-[11px] uppercase tracking-[0.14em] text-muted">
-                          {typeLabel}
-                          {item.characterName ? ` · ${item.characterName}` : ""}
-                        </p>
-                        <h3 className="text-sm font-semibold text-text">
-                          {item.title}
-                        </h3>
-                      </article>
-                    );
-                  })}
-                </div>
+                <>
+                  {downloadMessage ? (
+                    <p className="mt-4 text-sm text-muted">{downloadMessage}</p>
+                  ) : null}
+                  <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                    {libraryItems.map((item) => {
+                      const productType = resolveProductType(item);
+                      const typeLabel = isProductType(productType)
+                        ? PRODUCT_TYPE_CONFIG[productType as ProductType]
+                            .singular
+                        : productType === "COLLECTION"
+                          ? "Collection"
+                          : productType;
+                      const href =
+                        item.type === "collection"
+                          ? `/collections/${item.productId}`
+                          : `/library/${item.productId}`;
+                      const isMasterDownload =
+                        productType === "VIDEO" || productType === "AI_IMAGE";
+                      const busy = downloadBusyId === item.productId;
+                      return (
+                        <article key={item.id} className="group">
+                          <div className="relative aspect-[9/16] overflow-hidden rounded-2xl ring-1 ring-border">
+                            <CoverImage
+                              src={item.thumbnail}
+                              alt=""
+                              fill
+                              sizes="200px"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
+                            {isMasterDownload ? (
+                              <button
+                                type="button"
+                                disabled={Boolean(downloadBusyId)}
+                                onClick={() =>
+                                  void onLibraryDownload(item.productId)
+                                }
+                                className="absolute bottom-3 left-3 right-3 rounded-full bg-white/15 py-2 text-center text-xs font-semibold text-white backdrop-blur-md transition hover:bg-accent disabled:opacity-50"
+                              >
+                                {busy ? "Preparing…" : libraryCta(productType)}
+                              </button>
+                            ) : (
+                              <Link
+                                href={href}
+                                className="absolute bottom-3 left-3 right-3 rounded-full bg-white/15 py-2 text-center text-xs font-semibold text-white backdrop-blur-md transition hover:bg-accent"
+                              >
+                                {libraryCta(productType)}
+                              </Link>
+                            )}
+                          </div>
+                          <p className="mt-3 text-[11px] uppercase tracking-[0.14em] text-muted">
+                            {typeLabel}
+                            {item.characterName
+                              ? ` · ${item.characterName}`
+                              : ""}
+                          </p>
+                          <h3 className="text-sm font-semibold text-text">
+                            {item.title}
+                          </h3>
+                          {isMasterDownload ? (
+                            <Link
+                              href={href}
+                              className="mt-1 inline-block text-[11px] font-medium text-accent"
+                            >
+                              View details
+                            </Link>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </>
               )}
             </div>
           )}

@@ -274,34 +274,17 @@ function SecureMasterDownload({
         disabled={busy}
         className="mt-4 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
         onClick={async () => {
+          if (busy) return;
           setMessage(null);
           setBusy(true);
           try {
-            const res = await fetch("/api/library/download", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ productId }),
-            });
-            const data = (await res.json().catch(() => null)) as {
-              ok?: boolean;
-              error?: string;
-              downloadUrl?: string;
-              fileName?: string;
-            } | null;
-            if (!res.ok || !data?.ok || !data.downloadUrl) {
-              setMessage(
-                data?.error ||
-                  "Download is unavailable without a verified purchase.",
-              );
-              return;
+            const { requestAndStartMasterDownload } = await import(
+              "@/lib/commerce/clientMasterDownload"
+            );
+            const result = await requestAndStartMasterDownload(productId);
+            if (!result.ok) {
+              setMessage(result.error);
             }
-            const a = document.createElement("a");
-            a.href = data.downloadUrl;
-            a.download = data.fileName || "download";
-            a.rel = "noopener";
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
           } catch {
             setMessage("Download request failed.");
           } finally {

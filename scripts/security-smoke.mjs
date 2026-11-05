@@ -134,6 +134,22 @@ if (
 ) {
   fail("download helper must deny without entitlement then sign");
 }
+if (
+  !dlHelper.includes("sanitizeDownloadFileName") ||
+  !dlHelper.includes("download: fileName")
+) {
+  fail("signed master URLs must request attachment download filename");
+}
+const clientDl = readFileSync(
+  join(root, "src/lib/commerce/clientMasterDownload.ts"),
+  "utf8",
+);
+if (
+  clientDl.includes("window.open") ||
+  /target\s*=\s*["']_blank["']/.test(clientDl)
+) {
+  fail("master download client must not open a new tab");
+}
 const dlCode = dl
   .split("\n")
   .filter((line) => !/^\s*(\*|\/\*|\*\/|\/\/)/.test(line.trim()) && !/^\s*\/\*/.test(line))

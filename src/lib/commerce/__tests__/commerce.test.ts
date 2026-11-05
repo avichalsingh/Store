@@ -661,8 +661,41 @@ describe("commerce routes and migration", () => {
       join(root, "src/app/api/library/download/route.ts"),
       "utf8",
     );
+    const helper = readFileSync(
+      join(root, "src/lib/commerce/download.ts"),
+      "utf8",
+    );
+    const client = readFileSync(
+      join(root, "src/lib/commerce/clientMasterDownload.ts"),
+      "utf8",
+    );
+    const libraryPage = readFileSync(
+      join(root, "src/app/(store)/library/[productId]/page.tsx"),
+      "utf8",
+    );
     assert.match(route, /getUser/);
     assert.match(route, /createEntitledMasterDownload/);
+    assert.match(helper, /userHasEntitlement|ENTITLEMENT_REQUIRED/);
+    assert.match(helper, /createSignedUrl/);
+    assert.match(helper, /download:\s*fileName/);
+    assert.match(helper, /sanitizeDownloadFileName/);
+    assert.match(client, /startAttachmentDownload/);
+    assert.doesNotMatch(client, /window\.open/);
+    assert.doesNotMatch(client, /\.target\s*=/);
+    assert.doesNotMatch(libraryPage, /window\.open/);
+    assert.match(client, /a\.download\s*=/);
+  });
+
+  it("sanitizeDownloadFileName is filesystem-safe and ends with .mp4", async () => {
+    const { sanitizeDownloadFileName } = await import("../download");
+    assert.equal(sanitizeDownloadFileName("Neon Dance!!"), "Neon-Dance.mp4");
+    assert.equal(
+      sanitizeDownloadFileName("../../etc/passwd"),
+      "etc-passwd.mp4",
+    );
+    assert.equal(sanitizeDownloadFileName("clip.mp4"), "clip.mp4");
+    assert.ok(sanitizeDownloadFileName("").endsWith(".mp4"));
+    assert.doesNotMatch(sanitizeDownloadFileName("A / B \\ C"), /[\\/]/);
   });
 
   it("account purchases API reads entitlements for the signed-in user", () => {

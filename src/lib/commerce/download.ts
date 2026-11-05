@@ -8,6 +8,22 @@ import { MEDIA_MASTERS_BUCKET } from "@/lib/supabase/mediaStorage";
 
 const SIGNED_URL_TTL_SECONDS = 120;
 
+/**
+ * Filesystem-safe attachment name ending in `.mp4` (product title preferred).
+ */
+export function sanitizeDownloadFileName(raw: string): string {
+  const base =
+    raw
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^[.-]+|[.-]+$/g, "")
+      .slice(0, 80) || "download";
+  const withoutMp4 = base.replace(/\.mp4$/i, "");
+  return `${withoutMp4 || "download"}.mp4`;
+}
+
 export type SignedDownload =
   | {
       ok: true;
@@ -102,9 +118,19 @@ export async function createEntitledMasterDownload(
     };
   }
 
+  const fileName = sanitizeDownloadFileName(
+    product.name?.trim() ||
+      asset.original_file_name?.trim() ||
+      asset.name?.trim() ||
+      path.split("/").pop() ||
+      "download",
+  );
+
+  // `download: fileName` makes Storage serve Content-Disposition: attachment
+  // so browsers download instead of inline-playing the MP4.
   const { data: signed, error: signErr } = await admin.storage
     .from(bucket)
-    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS, { download: fileName });
 
   if (signErr || !signed?.signedUrl) {
     return {
@@ -114,12 +140,6 @@ export async function createEntitledMasterDownload(
       code: "SIGN_FAILED",
     };
   }
-
-  const fileName =
-    asset.original_file_name?.trim() ||
-    asset.name?.trim() ||
-    path.split("/").pop() ||
-    "download";
 
   return {
     ok: true,
