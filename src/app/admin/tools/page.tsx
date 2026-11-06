@@ -31,7 +31,7 @@ import { useMemo, useState } from "react";
 type BoolFilter = "all" | "yes" | "no";
 
 export default function ToolsListPage() {
-  const { aiTools, deleteAiTool } = useAdmin();
+  const { aiTools, deleteAiTool, pushToast } = useAdmin();
   const [q, setQ] = useState("");
   const [category, setCategory] = useState<"all" | ToolCategoryId>("all");
   const [status, setStatus] = useState<"all" | ToolStatus>("all");
@@ -41,6 +41,11 @@ export default function ToolsListPage() {
   const [menuId, setMenuId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+
+  const deleteTarget = deleteId
+    ? aiTools.find((t) => t.id === deleteId)
+    : undefined;
+  const deleteBlocked = deleteTarget?.status === "active";
 
   const rows = useMemo(() => {
     let list = [...aiTools];
@@ -75,7 +80,7 @@ export default function ToolsListPage() {
     <div>
       <AdminPageHeader
         title="AI Tools"
-        description="Affiliate / demo tools catalog for the RHYTHM Tools surface."
+        description="Affiliate / demo tools catalog for the PRAGVI Tools surface."
         actions={
           <>
             <Link href="/admin/tools/monitoring">
@@ -260,9 +265,22 @@ export default function ToolsListPage() {
                       </Link>
                       <button
                         type="button"
-                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-[var(--admin-danger)] hover:bg-[var(--admin-surface-2)]"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-[var(--admin-danger)] hover:bg-[var(--admin-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={t.status === "active"}
+                        title={
+                          t.status === "active"
+                            ? "Unpublish before deleting"
+                            : undefined
+                        }
                         onClick={() => {
                           setMenuId(null);
+                          if (t.status === "active") {
+                            pushToast(
+                              "Unpublish this tool from the storefront before deleting it.",
+                              "error",
+                            );
+                            return;
+                          }
                           setDeleteId(t.id);
                         }}
                       >
@@ -278,13 +296,23 @@ export default function ToolsListPage() {
       )}
 
       <AdminConfirmDialog
-        open={!!deleteId}
+        open={!!deleteId && !deleteBlocked}
         onClose={() => setDeleteId(null)}
         onConfirm={() => {
-          if (deleteId) deleteAiTool(deleteId);
+          if (!deleteId) return;
+          const tool = aiTools.find((t) => t.id === deleteId);
+          if (tool?.status === "active") {
+            pushToast(
+              "Unpublish this tool from the storefront before deleting it.",
+              "error",
+            );
+            setDeleteId(null);
+            return;
+          }
+          deleteAiTool(deleteId);
         }}
         title="Delete tool?"
-        description="This removes the tool and any pending monitoring changes for it."
+        description="This removes the local CMS draft and pending monitoring changes. Published tools must be unpublished first."
         confirmLabel="Delete"
         danger
       />

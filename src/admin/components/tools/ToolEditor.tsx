@@ -13,6 +13,7 @@ import {
 import { AdminPageHeader } from "@/admin/components/ui/AdminPageHeader";
 import { blankTool } from "@/admin/lib/normalizeTool";
 import { slugify, uid } from "@/admin/lib/format";
+import { publishToolToCatalog } from "@/admin/lib/publishToolToCatalog";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import {
   TOOL_AUTOMATION_MODES,
@@ -56,13 +57,15 @@ export function ToolEditor({
   initialDraft?: Partial<AiTool>;
 }) {
   const router = useRouter();
-  const { aiTools, upsertAiTool, deleteAiTool, hydrated } = useAdmin();
+  const { aiTools, upsertAiTool, deleteAiTool, hydrated, pushToast } =
+    useAdmin();
   const existing = toolId ? aiTools.find((t) => t.id === toolId) : undefined;
 
   const [draft, setDraft] = useState<AiTool | null>(null);
   const [baseline, setBaseline] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [featureInput, setFeatureInput] = useState("");
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -102,23 +105,50 @@ export function ToolEditor({
     setDraft((d) => (d ? { ...d, [key]: value } : d));
   };
 
-  const save = (status?: AiTool["status"]) => {
-    const next: AiTool = {
-      ...draft,
-      status: status ?? draft.status,
-      slug: draft.slug || slugify(draft.name) || draft.id,
-      categories: draft.categories.includes(draft.primaryCategory)
-        ? draft.categories
-        : [draft.primaryCategory, ...draft.categories],
-      updatedAt: new Date().toISOString(),
-    };
-    upsertAiTool(
-      next,
-      status === "active" ? "Tool published" : "Tool draft saved",
-    );
+  const prepareNext = (status: AiTool["status"]): AiTool => ({
+    ...draft,
+    status,
+    slug: draft.slug || slugify(draft.name) || draft.id,
+    categories: draft.categories.includes(draft.primaryCategory)
+      ? draft.categories
+      : [draft.primaryCategory, ...draft.categories],
+    // Manual deals stay origin=manual (no auto-discovery).
+    offer: { ...draft.offer, origin: "manual" },
+    dataOrigin: draft.dataOrigin === "demo" ? "manual" : draft.dataOrigin,
+    updatedAt: new Date().toISOString(),
+  });
+
+  /** Local CMS draft only — never appears on storefront until Publish. */
+  const saveDraft = () => {
+    const next = prepareNext("draft");
+    upsertAiTool(next, "Tool draft saved locally (not on storefront)");
     setDraft(next);
     setBaseline(JSON.stringify(next));
     if (!toolId) router.replace(`/admin/tools/${next.id}/edit`);
+  };
+
+  /**
+   * Publish / unpublish to Supabase catalog.
+   * Deal fields upsert independently of affiliate URL (separate columns).
+   */
+  const publish = async (status: "active" | "inactive" | "draft") => {
+    if (publishing) return;
+    const next = prepareNext(status);
+    setPublishing(true);
+    try {
+      const result = await publishToolToCatalog(next);
+      if (!result.ok) {
+        pushToast(result.error, "error");
+        return;
+      }
+      upsertAiTool(next, null);
+      pushToast(result.message, result.dryRun ? "info" : "success");
+      setDraft(next);
+      setBaseline(JSON.stringify(next));
+      if (!toolId) router.replace(`/admin/tools/${next.id}/edit`);
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const toggleCategory = (cat: ToolCategoryId) => {
@@ -140,18 +170,35 @@ export function ToolEditor({
     <div className="pb-16">
       <AdminPageHeader
         title={toolId ? draft.name || "Edit tool" : "New AI tool"}
-        description="Affiliate tools catalog — pricing and offers are editor-managed."
+        description="Manual affiliate directory — deals are editor-managed and publish separately from local drafts."
         actions={
           <>
             <AdminBadge tone={originTone(draft.dataOrigin)}>
               {draft.dataOrigin}
             </AdminBadge>
             <StatusBadge status={draft.status} />
-            <AdminButton variant="secondary" onClick={() => save("draft")}>
+            <AdminButton
+              variant="secondary"
+              disabled={publishing}
+              onClick={saveDraft}
+            >
               Save draft
             </AdminButton>
-            <AdminButton variant="primary" onClick={() => save("active")}>
-              Publish
+            {draft.status === "active" ? (
+              <AdminButton
+                variant="secondary"
+                disabled={publishing}
+                onClick={() => void publish("inactive")}
+              >
+                {publishing ? "Working…" : "Unpublish"}
+              </AdminButton>
+            ) : null}
+            <AdminButton
+              variant="primary"
+              disabled={publishing}
+              onClick={() => void publish("active")}
+            >
+              {publishing ? "Publishing…" : "Publish to storefront"}
             </AdminButton>
           </>
         }
@@ -756,6 +803,25 @@ export function ToolEditor({
                 }
               />
             </AdminField>
+            <AdminField label="Coupon code (optional)">
+              <AdminInput
+                value={draft.offer.couponCode ?? ""}
+                placeholder="Does not change affiliate URL"
+                onChange={(e) =>
+                  setDraft((d) =>
+                    d
+                      ? {
+                          ...d,
+                          offer: {
+                            ...d.offer,
+                            couponCode: e.target.value.trim() || undefined,
+                          },
+                        }
+                      : d,
+                  )
+                }
+              />
+            </AdminField>
             <AdminField label="Sale start">
               <AdminInput
                 type="datetime-local"
@@ -970,10 +1036,23 @@ export function ToolEditor({
         ) : null}
 
         {toolId ? (
-          <div className="flex justify-end">
+          <div className="flex flex-col items-end gap-2">
+            {draft.status === "active" ? (
+              <p className="text-xs text-[var(--admin-muted)]">
+                Unpublish from the storefront before permanent deletion.
+              </p>
+            ) : null}
             <AdminButton
               variant="danger"
+              disabled={draft.status === "active" || publishing}
               onClick={() => {
+                if (draft.status === "active") {
+                  pushToast(
+                    "Unpublish this tool from the storefront before deleting it.",
+                    "error",
+                  );
+                  return;
+                }
                 if (
                   typeof window !== "undefined" &&
                   !window.confirm("Delete this tool?")

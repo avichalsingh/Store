@@ -292,3 +292,39 @@ describe("secrets stay server-only in client entrypoints", () => {
     assert.doesNotMatch(src, /WORKER_SHARED_SECRET/);
   });
 });
+
+describe("AI tools publish auth boundaries", () => {
+  it("tools publish routes require admin session before service-role writes", () => {
+    for (const rel of [
+      "src/app/api/admin/catalog/tools/publish/route.ts",
+      "src/app/api/admin/catalog/tools/settings/publish/route.ts",
+    ]) {
+      const src = readFileSync(join(root, rel), "utf8");
+      assert.match(src, /ADMIN_SESSION_COOKIE/);
+      assert.match(src, /isAdminSessionTokenValid/);
+      assert.match(src, /createServiceClient/);
+      assert.match(src, /isCatalogRemotePublishEnabled/);
+      const sessionIdx = src.indexOf("isAdminSessionTokenValid");
+      const serviceIdx = src.indexOf("createServiceClient()");
+      assert.ok(sessionIdx >= 0 && serviceIdx > sessionIdx, rel);
+    }
+  });
+
+  it("public tools API uses anon client only and never imports service role", () => {
+    const src = readFileSync(join(root, "src/app/api/tools/route.ts"), "utf8");
+    assert.match(src, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+    assert.match(src, /catalog_ai_tools/);
+    assert.doesNotMatch(src, /SERVICE_ROLE|createServiceClient|ADMIN_API_SECRET/);
+  });
+
+  it("admin session cookie helper stays httpOnly and never embeds the raw secret", () => {
+    const src = readFileSync(
+      join(root, "src/admin/lib/adminSessionCookie.ts"),
+      "utf8",
+    );
+    assert.match(src, /httpOnly:\s*true/);
+    assert.match(src, /createHmac/);
+    assert.match(src, /timingSafeEqual/);
+    assert.doesNotMatch(src, /createServiceClient/);
+  });
+});

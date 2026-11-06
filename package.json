@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:security": "node scripts/security-smoke.mjs && npx tsx --test src/lib/security/__tests__/*.test.ts src/lib/commerce/__tests__/*.test.ts",
+    "test:security": "node scripts/security-smoke.mjs && npx tsx --test src/lib/security/__tests__/*.test.ts src/lib/commerce/__tests__/*.test.ts src/catalog/__tests__/*.test.ts",
     "catalog:export-prod": "node scripts/catalog-export-prod.mjs",
     "catalog:import-staging": "node scripts/catalog-import-staging.mjs",
     "catalog:copy-previews": "node scripts/catalog-copy-previews.mjs",

@@ -220,9 +220,6 @@ export function ToolDetailClient({ slug }: { slug: string }) {
                 {tool.pricing.freeTrialDetails}
               </p>
             ) : null}
-            {tool.pricing.pricingNotes ? (
-              <p className="mt-2 text-sm text-muted">{tool.pricing.pricingNotes}</p>
-            ) : null}
             {demoPricing ? (
               <p className="mt-3 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
                 Demo pricing
@@ -245,6 +242,14 @@ export function ToolDetailClient({ slug }: { slug: string }) {
                   Ends{" "}
                   {formatChecked(tool.offer.saleEndDate)?.split(",")[0] ??
                     tool.offer.saleEndDate}
+                </p>
+              ) : null}
+              {tool.offer.couponCode ? (
+                <p className="mt-2 text-sm font-medium text-text">
+                  Code:{" "}
+                  <span className="rounded-md bg-surface-2 px-2 py-0.5 font-mono text-accent">
+                    {tool.offer.couponCode}
+                  </span>
                 </p>
               ) : null}
               {tool.offer.origin === "demo" ? (

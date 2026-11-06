@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { SearchBar } from "@/components/ui/SearchBar";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { ToolCard } from "@/components/tools/ToolCard";
+import { PRODUCT_CARD_GRID_GAP } from "@/components/products/productCardGrid";
 import { useToolsCatalog } from "@/catalog/tools/useToolsCatalog";
 import {
   TOOL_CATEGORIES,
@@ -68,8 +69,9 @@ export function ToolsBrowseClient() {
           AI Tools
         </h1>
         <p className="mt-3 text-muted">
-          Discover image, video, music, and workflow tools curated for RHYTHM
-          creators — with deals and free trials when available.
+          Curated third-party AI tools and partner deals for PRAGVI creators.
+          Affiliate offers open on partner sites — distinct from products sold
+          directly by PRAGVI.
         </p>
       </header>
 
@@ -111,7 +113,12 @@ export function ToolsBrowseClient() {
             title="Featured tools"
             description="Hand-picked picks for creators building with AI."
           />
-          <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 hide-scrollbar sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-3">
+          <div
+            className={cn(
+              "-mx-4 flex overflow-x-auto px-4 pb-2 hide-scrollbar sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-3",
+              PRODUCT_CARD_GRID_GAP,
+            )}
+          >
             {featured.map((tool) => (
               <ToolCard
                 key={tool.id}
@@ -128,9 +135,14 @@ export function ToolsBrowseClient() {
           <SectionHeader
             eyebrow="For you"
             title="Recommended"
-            description="Solid everyday tools that pair well with RHYTHM workflows."
+            description="Solid everyday tools that pair well with PRAGVI workflows."
           />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className={cn(
+              "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+              PRODUCT_CARD_GRID_GAP,
+            )}
+          >
             {recommended.map((tool) => (
               <ToolCard key={tool.id} tool={tool} />
             ))}
@@ -145,7 +157,12 @@ export function ToolsBrowseClient() {
             title="Active deals"
             description="Live sales and discounts — demo offers marked in CMS when applicable."
           />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className={cn(
+              "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+              PRODUCT_CARD_GRID_GAP,
+            )}
+          >
             {activeDeals.map((tool) => (
               <ToolCard key={tool.id} tool={tool} />
             ))}
@@ -182,7 +199,12 @@ export function ToolsBrowseClient() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className={cn(
+              "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+              PRODUCT_CARD_GRID_GAP,
+            )}
+          >
             {filtered.map((tool) => (
               <ToolCard
                 key={tool.id}

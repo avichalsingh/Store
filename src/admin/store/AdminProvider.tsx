@@ -28,7 +28,6 @@ import type {
   ToolPendingChange,
   ToolsSettings,
 } from "@/catalog/tools/types";
-import { toolsSeedProducts } from "@/admin/data/toolsSeed";
 import { uid } from "@/admin/lib/format";
 import {
   normalizeCharacter,
@@ -185,7 +184,7 @@ type AdminContextValue = AdminCmsState & {
   attachImageAssetToAiProduct: (productId: string, assetId: string) => void;
   /** Remove a Media Library image from an AI Image product's selected assets. */
   detachImageAssetFromAiProduct: (productId: string, assetId: string) => void;
-  upsertAiTool: (tool: AiTool, toast?: string) => void;
+  upsertAiTool: (tool: AiTool, toast?: string | null) => void;
   deleteAiTool: (id: string) => void;
   setToolsSettings: (settings: ToolsSettings, toast?: string | null) => void;
   resolveToolPendingChange: (
@@ -344,16 +343,13 @@ function ensureImagePdpSettings(
   };
 }
 
+/**
+ * Formerly reinjected demo tools from toolsSeedProducts on every hydrate.
+ * Launch: keep saved CMS tools only — do not auto-add missing seed demos.
+ * Call site remains `ensureToolsSeed(normalizeTools(...))`.
+ */
 function ensureToolsSeed(tools: AiTool[]): AiTool[] {
-  const byId = new Map(tools.map((t) => [t.id, t]));
-  let changed = false;
-  for (const seed of toolsSeedProducts) {
-    if (!byId.has(seed.id)) {
-      byId.set(seed.id, normalizeTool(seed));
-      changed = true;
-    }
-  }
-  return changed ? Array.from(byId.values()) : tools;
+  return tools;
 }
 
 function normalizeLoadedState(state: AdminCmsState): AdminCmsState {
@@ -2466,7 +2462,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, [pushToast]);
 
   const upsertAiTool = useCallback(
-    (tool: AiTool, toast = "Tool saved") => {
+    (tool: AiTool, toast: string | null = "Tool saved") => {
       const next = normalizeTool({
         ...tool,
         updatedAt: new Date().toISOString(),
@@ -2480,20 +2476,36 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             : [next, ...prev.aiTools],
         };
       });
-      pushToast(toast);
+      if (toast) pushToast(toast);
     },
     [patch, pushToast],
   );
 
   const deleteAiTool = useCallback(
     (id: string) => {
-      patch((prev) => ({
-        ...prev,
-        aiTools: prev.aiTools.filter((t) => t.id !== id),
-        toolPendingChanges: prev.toolPendingChanges.filter(
-          (c) => c.toolId !== id,
-        ),
-      }));
+      let blocked = false;
+      patch((prev) => {
+        const tool = prev.aiTools.find((t) => t.id === id);
+        // Active tools remain published in Supabase — require Unpublish first.
+        if (tool?.status === "active") {
+          blocked = true;
+          return prev;
+        }
+        return {
+          ...prev,
+          aiTools: prev.aiTools.filter((t) => t.id !== id),
+          toolPendingChanges: prev.toolPendingChanges.filter(
+            (c) => c.toolId !== id,
+          ),
+        };
+      });
+      if (blocked) {
+        pushToast(
+          "Unpublish this tool from the storefront before deleting it.",
+          "error",
+        );
+        return;
+      }
       pushToast("Tool deleted");
     },
     [patch, pushToast],

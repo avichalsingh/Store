@@ -99,6 +99,7 @@ export function normalizeTool(raw: Partial<AiTool> & { id: string }): AiTool {
       saleEndDate: raw.offer?.saleEndDate,
       offerDescription: raw.offer?.offerDescription,
       offerCtaText: raw.offer?.offerCtaText,
+      couponCode: raw.offer?.couponCode?.trim() || undefined,
       origin: raw.offer?.origin ?? raw.dataOrigin ?? "manual",
     },
     monitoring: {
@@ -132,7 +133,30 @@ export function normalizeTools(tools: Partial<AiTool>[]): AiTool[] {
 export function normalizeToolsSettings(
   raw?: Partial<ToolsSettings> | null,
 ): ToolsSettings {
-  return { ...DEFAULT_TOOLS_SETTINGS, ...(raw ?? {}) };
+  const merged = { ...DEFAULT_TOOLS_SETTINGS, ...(raw ?? {}) };
+  const ids = Array.isArray(raw?.homepageDealToolIds)
+    ? raw.homepageDealToolIds
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => id.trim())
+        .filter(Boolean)
+    : DEFAULT_TOOLS_SETTINGS.homepageDealToolIds;
+  const seen = new Set<string>();
+  const homepageDealToolIds: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    homepageDealToolIds.push(id);
+  }
+  return {
+    ...merged,
+    homepageDealToolIds,
+    homepageMinDiscountPercent: Number.isFinite(merged.homepageMinDiscountPercent)
+      ? Math.max(0, Math.floor(merged.homepageMinDiscountPercent))
+      : DEFAULT_TOOLS_SETTINGS.homepageMinDiscountPercent,
+    homepageMaxDeals: Number.isFinite(merged.homepageMaxDeals)
+      ? Math.max(0, Math.floor(merged.homepageMaxDeals))
+      : DEFAULT_TOOLS_SETTINGS.homepageMaxDeals,
+  };
 }
 
 export function normalizePendingChanges(

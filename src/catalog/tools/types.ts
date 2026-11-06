@@ -1,6 +1,11 @@
 /**
  * AI Tools / Affiliate Tools — central types & category registry.
  * Separate from Shop products (Videos, Images, Prompts, etc.).
+ *
+ * Persistence (Stage 1):
+ * - Today: AdminProvider localStorage (`aiTools`, `toolsSettings`).
+ * - Proposed durable store: `supabase/proposals/stage1_ai_tools.sql`
+ *   (NOT executed; awaiting migration approval). Do not backfill until then.
  */
 
 export const TOOL_CATEGORIES = [
@@ -130,6 +135,8 @@ export type ToolOffer = {
   saleEndDate?: string;
   offerDescription?: string;
   offerCtaText?: string;
+  /** Optional coupon / promo code (manual deals). Independent of affiliate URL. */
+  couponCode?: string;
   origin: ToolDataOrigin;
 };
 
@@ -250,18 +257,26 @@ export type ToolsSettings = {
   homepagePreferFeatured: boolean;
   homepageOnlyVerifiedDeals: boolean;
   homepageAutoPromote: boolean;
+  /**
+   * Optional explicit homepage deal order (tool ids). Empty → algorithmic
+   * ranking (featured/recommended/discount/sortOrder). Local CMS only —
+   * not a database migration.
+   */
+  homepageDealToolIds: string[];
 };
 
 export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   affiliateDisclosureEnabled: true,
   affiliateDisclosureText:
-    "Some links may be affiliate links. RHYTHM may earn a commission at no additional cost to you.",
+    "Some links may be affiliate links. PRAGVI may earn a commission at no additional cost to you.",
   homepageDealsEnabled: true,
   homepageMinDiscountPercent: 20,
   homepageMaxDeals: 3,
   homepagePreferFeatured: true,
-  homepageOnlyVerifiedDeals: true,
+  // Launch: manual deals are the source of truth (not auto-verified scrapes).
+  homepageOnlyVerifiedDeals: false,
   homepageAutoPromote: false,
+  homepageDealToolIds: [],
 };
 
 export function isToolCategoryId(value: unknown): value is ToolCategoryId {
