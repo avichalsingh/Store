@@ -498,36 +498,37 @@ export const creatorTestimonials: CreatorTestimonial[] = [
   },
 ];
 
+/** Labels only — never ship seed play/engagement counts as public ticker metrics. */
 export const trendingStripItems: TrendingStripItem[] = [
   {
     id: "ts-1",
     videoId: "vid-001",
     label: "🔥 PULSE DROP",
-    metric: "3.3M PLAYS",
+    metric: "",
   },
   {
     id: "ts-2",
     videoId: "vid-002",
     label: "🚀 NEON SHUFFLE",
-    metric: "+186% ENGAGEMENT",
+    metric: "",
   },
   {
     id: "ts-3",
     videoId: "vid-004",
     label: "↗ SPARK PARADE",
-    metric: "14.1K SHARES",
+    metric: "",
   },
   {
     id: "ts-4",
     videoId: "vid-023",
     label: "💬 GLITCH PARTY",
-    metric: "9.4K COMMENTS",
+    metric: "",
   },
   {
     id: "ts-5",
     videoId: "vid-006",
     label: "👀 SCROLL STOPPER",
-    metric: "73% WATCH-THROUGH",
+    metric: "",
   },
 ];
 

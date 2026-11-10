@@ -38,11 +38,6 @@ export function CollectionBuyColumn({
           ? ` · ${collection.exclusiveCount} exclusive`
           : ""}
       </p>
-      {collection.socialProofText && (
-        <p className="text-sm font-medium text-accent">
-          {collection.socialProofText}
-        </p>
-      )}
 
       <LaunchOfferCard quote={quote} offer={collection.offer} />
 

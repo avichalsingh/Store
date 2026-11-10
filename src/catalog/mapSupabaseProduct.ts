@@ -9,6 +9,7 @@ import type { ProductRelationship } from "@/catalog/productPayloads";
 import { adminProductToCatalog } from "@/catalog/mapAdminToStorefront";
 import { defaultImagePdpGlobalSettings } from "@/catalog/imagePdpTypes";
 import { isProductType, type ProductRelationshipType } from "@/catalog/productTypes";
+import { isPublicCatalogPublishable } from "@/catalog/publicCatalogPublication";
 import type { CaptionPackProductPublic, CatalogProduct } from "@/types";
 
 /** Public-safe media_assets fields for catalog enrichment (never masters). */
@@ -204,13 +205,14 @@ export function catalogRowToAdminProduct(
       USD: { regularPrice: 0, currentPrice: 0 },
     },
     offer: row.offer ?? { enabled: false, label: "" },
+    // Empty demo shells only — storefront mapPerformance strips non-publishable modes.
     performance: row.performance ?? {
       mode: "demo",
-      plays: "0",
+      plays: "",
       playsNumeric: 0,
-      likes: "0",
+      likes: "",
       likesNumeric: 0,
-      shares: "0",
+      shares: "",
       sharesNumeric: 0,
       engagementPct: 0,
       status: "normal",
@@ -345,6 +347,18 @@ export function mapCatalogViewsToProducts(
       byProduct.get(row.id) ?? [],
     );
     if (!admin) continue;
+    // Defence-in-depth: view already filters status=active; also drop
+    // explicit internal/test/seed-fixture rows before public mapping.
+    if (
+      !isPublicCatalogPublishable({
+        id: admin.id,
+        slug: admin.slug,
+        status: admin.status,
+        tags: admin.tags,
+      })
+    ) {
+      continue;
+    }
     const mediaId = admin.mediaAssetId?.trim();
     adminProducts.push(
       enrichAdminProductFromMediaAsset(
@@ -355,6 +369,7 @@ export function mapCatalogViewsToProducts(
   }
 
   const settings = defaultImagePdpGlobalSettings();
+  const publishableIds = new Set(adminProducts.map((p) => p.id));
   const out: CatalogProduct[] = [];
 
   for (const admin of adminProducts) {
@@ -366,8 +381,38 @@ export function mapCatalogViewsToProducts(
       settings,
     );
     if (!mapped) continue;
-    out.push(patchCaptionPackPublic(mapped, admin._captionPublicMeta));
+    out.push(
+      stripUnpublishedRelations(
+        patchCaptionPackPublic(mapped, admin._captionPublicMeta),
+        publishableIds,
+      ),
+    );
   }
 
   return out;
+}
+
+/** Drop add-on / related ids that are not themselves public-publishable. */
+function stripUnpublishedRelations(
+  product: CatalogProduct,
+  publishableIds: Set<string>,
+): CatalogProduct {
+  const keep = (ids: string[] | undefined) =>
+    ids?.filter((id) => publishableIds.has(id));
+
+  const next = { ...product } as CatalogProduct & {
+    addOnProductIds?: string[];
+    relatedProductIds?: string[];
+    includedProductIds?: string[];
+  };
+  if ("addOnProductIds" in next) {
+    next.addOnProductIds = keep(next.addOnProductIds);
+  }
+  if ("relatedProductIds" in next) {
+    next.relatedProductIds = keep(next.relatedProductIds);
+  }
+  if (next.productType === "BUNDLE") {
+    next.includedProductIds = keep(next.includedProductIds) ?? [];
+  }
+  return next;
 }

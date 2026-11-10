@@ -17,12 +17,14 @@ export function AdminField({
   children: ReactNode;
   className?: string;
 }) {
+  // Use a div, not <label>: homepage pickers / toggles nest buttons and modals.
+  // A wrapping <label> synthesizes extra clicks and can discard picker confirms.
   return (
-    <label className={cn("flex flex-col gap-1.5", className)}>
+    <div className={cn("flex flex-col gap-1.5", className)}>
       <span className="text-xs font-medium text-[var(--admin-muted)]">{label}</span>
       {children}
       {hint ? <span className="text-[11px] text-[var(--admin-muted)]">{hint}</span> : null}
-    </label>
+    </div>
   );
 }
 

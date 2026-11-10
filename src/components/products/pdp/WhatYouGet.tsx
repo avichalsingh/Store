@@ -44,15 +44,21 @@ export function WhatYouGet({ video }: { video: VideoProduct }) {
       ? video.pdpValueCards.slice(0, 3)
       : defaultValueCards(video);
 
-  const details = video.fileDetails ?? {
+  const baseDetails = video.fileDetails ?? {
     dimensionsMain: "1080 × 1920",
     dimensionsSupporting: "Full HD vertical video",
     formatMain: video.format || "MP4",
     formatSupporting: "Ready-to-post file",
     accessMain: video.access || "Instant access",
     accessSupporting: "Download after checkout",
-    usageMain: "Personal + social",
-    usageSupporting: "Use it in your own content",
+    usageMain: "Personal-use licence",
+    usageSupporting: "Personal use only — not for commercial resale",
+  };
+  // Always align with legal personal-use licence (never invent commercial terms).
+  const details = {
+    ...baseDetails,
+    usageMain: "Personal-use licence",
+    usageSupporting: "Personal use only — not for commercial resale",
   };
 
   const specs = [

@@ -23,6 +23,13 @@ export function getRazorpayConfig():
       error: "Razorpay is not configured (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET)",
     };
   }
+  const modeCheck = assertRazorpayKeyModeConsistency({
+    keyId,
+    publicKeyId: getPublicRazorpayKeyId(),
+  });
+  if (!modeCheck.ok) {
+    return { ok: false, error: modeCheck.error };
+  }
   return {
     ok: true,
     config: { keyId, keySecret, webhookSecret },
@@ -35,6 +42,55 @@ export function getPublicRazorpayKeyId(): string | null {
     process.env.RAZORPAY_KEY_ID?.trim() ||
     null
   );
+}
+
+/** Razorpay key prefixes: rzp_test_* (test) vs rzp_live_* (live). */
+export function razorpayKeyMode(
+  keyId: string | null | undefined,
+): "test" | "live" | "unknown" {
+  const id = (keyId || "").trim();
+  if (id.startsWith("rzp_test_")) return "test";
+  if (id.startsWith("rzp_live_")) return "live";
+  return "unknown";
+}
+
+/**
+ * Refuse mixed test/live Checkout vs server keys (common staging misconfig).
+ * Official Checkout requires the browser key to match the Orders API key mode.
+ */
+export function assertRazorpayKeyModeConsistency(params: {
+  keyId: string;
+  publicKeyId: string | null;
+}): { ok: true } | { ok: false; error: string } {
+  const serverMode = razorpayKeyMode(params.keyId);
+  if (serverMode === "unknown") {
+    return {
+      ok: false,
+      error: "Razorpay key id must start with rzp_test_ or rzp_live_",
+    };
+  }
+  const pub = params.publicKeyId?.trim() || "";
+  if (!pub) return { ok: true };
+  const publicMode = razorpayKeyMode(pub);
+  if (publicMode === "unknown") {
+    return {
+      ok: false,
+      error: "NEXT_PUBLIC_RAZORPAY_KEY_ID must start with rzp_test_ or rzp_live_",
+    };
+  }
+  if (publicMode !== serverMode) {
+    return {
+      ok: false,
+      error: "Razorpay test/live key mismatch between public and server keys",
+    };
+  }
+  if (pub !== params.keyId.trim()) {
+    return {
+      ok: false,
+      error: "NEXT_PUBLIC_RAZORPAY_KEY_ID must match RAZORPAY_KEY_ID",
+    };
+  }
+  return { ok: true };
 }
 
 function safeEqualHex(a: string, b: string): boolean {
@@ -95,6 +151,17 @@ export async function createRazorpayOrder(params: {
 }): Promise<
   { ok: true; order: CreatedRazorpayOrder } | { ok: false; error: string }
 > {
+  if (
+    !Number.isInteger(params.amountPaise) ||
+    params.amountPaise < 100 ||
+    params.currency.toUpperCase() !== "INR"
+  ) {
+    return {
+      ok: false,
+      error: "Razorpay amount must be integer paise in INR (min 100)",
+    };
+  }
+
   const auth = Buffer.from(
     `${params.keyId}:${params.keySecret}`,
   ).toString("base64");
@@ -107,7 +174,7 @@ export async function createRazorpayOrder(params: {
     },
     body: JSON.stringify({
       amount: params.amountPaise,
-      currency: params.currency,
+      currency: "INR",
       receipt: params.receipt.slice(0, 40),
       payment_capture: 1,
       notes: params.notes ?? {},

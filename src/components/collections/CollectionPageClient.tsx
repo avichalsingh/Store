@@ -6,10 +6,12 @@ import { useCatalog } from "@/catalog/useCatalog";
 import { CollectionValueStack } from "@/components/collections/CollectionValueStack";
 import { CollectionBuyColumn } from "@/components/collections/CollectionBuyColumn";
 import { ViralPerformanceCard } from "@/components/products/ViralPerformanceCard";
+import { publicPerformance } from "@/catalog/publicPerformance";
 
 export function CollectionPageClient({ slug }: { slug: string }) {
   const catalog = useCatalog();
   const collection = catalog.getCollectionBySlug(slug);
+  const collectionPerformance = publicPerformance(collection?.performance);
 
   if (!catalog.hydrated) {
     return (
@@ -43,16 +45,16 @@ export function CollectionPageClient({ slug }: { slug: string }) {
             sizes="(max-width: 1024px) 100vw, 60vw"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-bg via-transparent to-transparent" />
-          {collection.performance ? (
+          {collectionPerformance ? (
             <div className="absolute bottom-4 left-4 right-4">
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-accent">
-                {collection.performance.badge}
+                {collectionPerformance.badge}
               </p>
               <p className="font-display text-4xl font-bold text-white">
-                {collection.performance.primaryMetric}
+                {collectionPerformance.primaryMetric}
               </p>
               <p className="text-xs uppercase tracking-[0.16em] text-white/70">
-                {collection.performance.primaryLabel}
+                {collectionPerformance.primaryLabel}
               </p>
             </div>
           ) : null}
@@ -68,9 +70,9 @@ export function CollectionPageClient({ slug }: { slug: string }) {
         <CollectionValueStack collection={collection} />
       </div>
 
-      {collection.performance ? (
+      {collectionPerformance ? (
         <div className="mt-10">
-          <ViralPerformanceCard performance={collection.performance} />
+          <ViralPerformanceCard performance={collectionPerformance} />
         </div>
       ) : null}
 

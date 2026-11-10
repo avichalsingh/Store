@@ -1,5 +1,5 @@
 /**
- * Central product-type registry for the RHYTHM marketplace.
+ * Central product-type registry for the PRAGVI marketplace.
  * Add new types here — avoid scattering productType if/else across the app.
  */
 
@@ -40,10 +40,10 @@ export type ProductTypeConfig = {
 export const PRODUCT_TYPE_CONFIG: Record<ProductType, ProductTypeConfig> = {
   VIDEO: {
     id: "VIDEO",
-    label: "Video",
-    singular: "Video",
-    plural: "Videos",
-    description: "Dance / motion video with master + watermarked preview",
+    label: "AI Dance Video",
+    singular: "AI Dance Video",
+    plural: "AI Dance Videos",
+    description: "AI dance / motion video with master + watermarked preview",
     href: "/videos",
     pdpBase: "/videos",
     icon: "video",

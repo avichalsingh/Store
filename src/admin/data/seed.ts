@@ -15,37 +15,35 @@ import { migrateAiImageProductsToMediaLibrary, createImageAssetFromUrl } from "@
 import { recomputeMediaUsage } from "@/admin/lib/mediaPreview";
 import { marketplaceSeedProducts } from "@/admin/data/marketplaceSeed";
 import {
-  toolsSeedPendingChanges,
-  toolsSeedPriceHistory,
-  toolsSeedProducts,
-  toolsSeedSettings,
-} from "@/admin/data/toolsSeed";
-import { normalizeTool } from "@/admin/lib/normalizeTool";
+  DEFAULT_HOMEPAGE_HERO,
+  DEFAULT_HOMEPAGE_SECTIONS,
+} from "@/catalog/homepageConfig";
+import {
+  DEFAULT_SITE_CONTENT,
+  type SiteContentConfig,
+} from "@/catalog/siteContent";
+import { stripPrivatePaidProducts } from "@/catalog/publicSafeProduct";
 import {
   defaultImagePdpGlobalSettings,
   type ImagePdpGlobalSettings,
 } from "@/catalog/imagePdpTypes";
-import type {
-  AiTool,
-  ToolPendingChange,
-  ToolPriceHistoryEntry,
-  ToolsSettings,
-} from "@/catalog/tools/types";
-import type {
-  AdminCampaign,
-  AdminCharacter,
-  AdminCollection,
-  AdminCustomer,
-  AdminNotification,
-  AdminOffer,
-  AdminOrder,
-  AdminProduct,
-  AnalyticsSnapshot,
-  Announcement,
-  GlobalMediaSettings,
-  HomepageHeroConfig,
-  HomepageSection,
-  MediaAsset,
+import {
+  DEFAULT_STORE_GENERAL_SETTINGS,
+  type AdminCampaign,
+  type AdminCharacter,
+  type AdminCollection,
+  type AdminCustomer,
+  type AdminNotification,
+  type AdminOffer,
+  type AdminOrder,
+  type AdminProduct,
+  type AnalyticsSnapshot,
+  type Announcement,
+  type GlobalMediaSettings,
+  type HomepageHeroConfig,
+  type HomepageSection,
+  type MediaAsset,
+  type StoreGeneralSettings,
 } from "@/admin/types";
 
 const now = "2026-08-25T10:00:00.000Z";
@@ -1448,25 +1446,13 @@ export const seedCustomers: AdminCustomer[] = [
   },
 ];
 
-export const seedHomepageSections: HomepageSection[] = [
-  { id: "hero", label: "Hero", enabled: true, order: 0 },
-  { id: "featured", label: "Featured collection", enabled: true, order: 1 },
-  { id: "trending", label: "Trending", enabled: true, order: 2 },
-  { id: "collections", label: "Collections", enabled: true, order: 3 },
-  { id: "creator-insight", label: "Creator insight", enabled: true, order: 4 },
-  { id: "promo", label: "Promo / early access", enabled: true, order: 5 },
-  { id: "footer", label: "Footer", enabled: true, order: 6 },
-];
+export const seedHomepageSections: HomepageSection[] = structuredClone(
+  DEFAULT_HOMEPAGE_SECTIONS,
+);
 
-export const seedHomepageHero: HomepageHeroConfig = {
-  eyebrow: "AI character dance videos",
-  headline: "Moves that feel alive",
-  supportingText:
-    "License premium vertical routines starring Milo, Zara, and the crew — ready for Reels, ads, and brand edits.",
-  featuredProductId: "vid-002",
-  ctaText: "Explore formats",
-  ctaHref: "/explore",
-};
+export const seedHomepageHero: HomepageHeroConfig = structuredClone(
+  DEFAULT_HOMEPAGE_HERO,
+);
 
 export const seedAnnouncements: Announcement[] = [
   {
@@ -1867,16 +1853,15 @@ export type AdminCmsState = {
   customers: AdminCustomer[];
   homepageSections: HomepageSection[];
   homepageHero: HomepageHeroConfig;
+  /** Stage 4 — nav, footer, about/legal, promo CTAs, badge labels. */
+  siteContent: SiteContentConfig;
   announcements: Announcement[];
   notifications: AdminNotification[];
   analytics: typeof seedAnalytics;
   mediaAssets: MediaAsset[];
   mediaSettings: GlobalMediaSettings;
-  /** External AI / affiliate tools (not Shop products). */
-  aiTools: AiTool[];
-  toolsSettings: ToolsSettings;
-  toolPendingChanges: ToolPendingChange[];
-  toolPriceHistory: ToolPriceHistoryEntry[];
+  /** General store profile fields from Admin → Settings. */
+  storeSettings: StoreGeneralSettings;
   /** Global Image PDP progressive pricing & deal defaults. */
   imagePdpSettings: ImagePdpGlobalSettings;
 };
@@ -1891,7 +1876,10 @@ export function createSeedState(): AdminCmsState {
     seedProductsNormalized,
     seedAssets,
   );
-  const products = migrated.products;
+  // Seed is public-safe: private prompt/caption bodies live in
+  // marketplacePrivatePayloads.ts (server-only) and hydrate via
+  // GET /api/admin/private-payloads inside ProductEditor — never into CMS LS.
+  const products = stripPrivatePaidProducts(migrated.products);
   const mediaAssets = recomputeMediaUsage(migrated.mediaAssets, products);
   const collections = structuredClone(seedCollections).map((c) =>
     normalizeCollection(c),
@@ -1910,15 +1898,13 @@ export function createSeedState(): AdminCmsState {
     customers: structuredClone(seedCustomers),
     homepageSections: structuredClone(seedHomepageSections),
     homepageHero: structuredClone(seedHomepageHero),
+    siteContent: structuredClone(DEFAULT_SITE_CONTENT),
     announcements: structuredClone(seedAnnouncements),
     notifications: structuredClone(seedNotifications),
     analytics: structuredClone(seedAnalytics),
     mediaAssets,
     mediaSettings: structuredClone(seedMediaSettings),
-    aiTools: structuredClone(toolsSeedProducts).map((t) => normalizeTool(t)),
-    toolsSettings: structuredClone(toolsSeedSettings),
-    toolPendingChanges: structuredClone(toolsSeedPendingChanges),
-    toolPriceHistory: structuredClone(toolsSeedPriceHistory),
+    storeSettings: structuredClone(DEFAULT_STORE_GENERAL_SETTINGS),
     imagePdpSettings: defaultImagePdpGlobalSettings(),
   };
 }

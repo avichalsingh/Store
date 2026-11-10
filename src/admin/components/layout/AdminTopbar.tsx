@@ -107,7 +107,7 @@ export function AdminTopbar({
         type="button"
         className="flex items-center gap-2 rounded-xl border border-[var(--admin-border)] bg-[var(--admin-surface)] px-2 py-1.5"
         onClick={() => {
-          if (confirm("Sign out of RHYTHM Admin?")) {
+          if (confirm("Sign out of PRAGVI Admin?")) {
             void signOutAdmin().then(() => {
               router.replace("/admin/login");
             });

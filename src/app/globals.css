@@ -62,8 +62,15 @@ html.light {
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--accent) 40%, transparent);
+    background: color-mix(in srgb, var(--accent) 40%, transparent);
     color: white;
+  }
+
+  @supports (color: color-mix(in oklab, red, red)) {
+    ::selection {
+      background: color-mix(in oklab, var(--accent) 40%, transparent);
+      color: white;
+    }
   }
 
   :focus-visible {
@@ -130,6 +137,10 @@ html.light {
   to {
     transform: translateX(-50%);
   }
+}
+
+.trending-strip-marquee {
+  animation: marquee 36s linear infinite;
 }
 
 /* Primary CTA: breathe then pause ~3.5s */
@@ -948,6 +959,295 @@ html.light {
   transform: scaleX(1);
 }
 
+@keyframes metric-tile-drift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes metric-tile-sheen {
+  0% {
+    transform: translateX(-120%) skewX(-18deg);
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translateX(160%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+.metric-tile-gradient-a {
+  background-image: linear-gradient(
+    135deg,
+    #ff4d7a 0%,
+    #ff7aa8 42%,
+    #ff9a5c 100%
+  );
+  background-size: 180% 180%;
+  animation: metric-tile-drift 9s ease-in-out infinite;
+}
+
+.metric-tile-gradient-b {
+  background-image: linear-gradient(
+    135deg,
+    #14b8a6 0%,
+    #22d3ee 48%,
+    #38bdf8 100%
+  );
+  background-size: 180% 180%;
+  animation: metric-tile-drift 10s ease-in-out infinite reverse;
+}
+
+.metric-tile-gradient-c {
+  background-image: linear-gradient(
+    135deg,
+    #f59e0b 0%,
+    #fb7185 45%,
+    #f97316 100%
+  );
+  background-size: 180% 180%;
+  animation: metric-tile-drift 8.5s ease-in-out infinite;
+}
+
+.metric-tile-gradient-d {
+  background-image: linear-gradient(
+    135deg,
+    #7c6cff 0%,
+    #a78bfa 46%,
+    #38bdf8 100%
+  );
+  background-size: 180% 180%;
+  animation: metric-tile-drift 11s ease-in-out infinite reverse;
+}
+
+.metric-tile-sheen {
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 65%
+  );
+  animation: metric-tile-sheen 5.5s ease-in-out infinite;
+}
+
+/* ─── Hero collage category cards (vibrant accents) ─── */
+@keyframes hero-category-wash-drift {
+  0%,
+  100% {
+    background-position: 0% 30%, 0% 0%, 100% 100%;
+  }
+  50% {
+    background-position: 100% 70%, 40% 20%, 60% 80%;
+  }
+}
+
+@keyframes hero-category-glow-drift {
+  /* background-position only — no transform/scale that can paint past the clip */
+  0%,
+  100% {
+    background-position: 30% 22%;
+    opacity: 0.7;
+  }
+  33% {
+    background-position: 62% 38%;
+    opacity: 0.92;
+  }
+  66% {
+    background-position: 40% 58%;
+    opacity: 0.78;
+  }
+}
+
+@keyframes hero-category-sheen-sweep {
+  0% {
+    transform: translateX(-130%) skewX(-16deg);
+    opacity: 0;
+  }
+  28% {
+    opacity: 0.55;
+  }
+  55%,
+  100% {
+    transform: translateX(140%) skewX(-16deg);
+    opacity: 0;
+  }
+}
+
+.hero-category-card {
+  --hero-cat-glow: rgba(255, 255, 255, 0.35);
+  --hero-cat-radius: 1.35rem;
+  --hero-cat-stroke: color-mix(in srgb, var(--hero-cat-a) 72%, var(--hero-cat-c));
+  /*
+    Outer Link is the single shape source:
+    radius + overflow + real border (same pattern as center collage cards).
+    Media lives in an inner overflow:hidden shell so blend/scale stay clipped.
+  */
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: var(--hero-cat-radius);
+  isolation: isolate;
+  border: 1.5px solid var(--hero-cat-stroke);
+  background-color: var(--color-surface-2, #1c1a22);
+  box-shadow: none;
+  filter: none;
+  outline: none;
+  transition:
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 320ms ease;
+}
+
+.hero-category-card:hover {
+  border-color: color-mix(in srgb, var(--hero-cat-b) 78%, white);
+  overflow: hidden;
+  border-radius: var(--hero-cat-radius);
+  box-shadow: none;
+  filter: none;
+}
+
+.hero-category-card--viral {
+  --hero-cat-a: #ff2d95;
+  --hero-cat-b: #e879f9;
+  --hero-cat-c: #a855f7;
+  --hero-cat-glow: #f0abfc;
+}
+
+.hero-category-card--images {
+  --hero-cat-a: #22d3ee;
+  --hero-cat-b: #10b981;
+  --hero-cat-c: #06b6d4;
+  --hero-cat-glow: #5eead4;
+}
+
+.hero-category-card--tools {
+  --hero-cat-a: #60a5fa;
+  --hero-cat-b: #a78bfa;
+  --hero-cat-c: #6366f1;
+  --hero-cat-glow: #93c5fd;
+}
+
+.hero-category-card--motion {
+  --hero-cat-a: #fb923c;
+  --hero-cat-b: #fb7185;
+  --hero-cat-c: #fbbf24;
+  --hero-cat-glow: #fdba74;
+}
+
+.hero-category-wash {
+  z-index: 1;
+  /* Localized lighting — keeps the photo bright and recognizable */
+  background-image:
+    radial-gradient(
+      90% 70% at 8% 0%,
+      color-mix(in srgb, var(--hero-cat-a) 55%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      85% 65% at 100% 100%,
+      color-mix(in srgb, var(--hero-cat-c) 50%, transparent),
+      transparent 55%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 35%,
+      color-mix(in srgb, var(--hero-cat-b) 28%, transparent) 100%
+    );
+  background-size: 160% 160%, 160% 160%, 100% 100%;
+  mix-blend-mode: soft-light;
+  animation: hero-category-wash-drift 7.5s ease-in-out infinite;
+}
+
+.hero-category-glow {
+  z-index: 2;
+  /* Soft color lighting inside the card only — no blur/filter that can smear past edges */
+  background-image: radial-gradient(
+    circle at 30% 22%,
+    color-mix(in srgb, var(--hero-cat-glow) 70%, transparent) 0%,
+    color-mix(in srgb, var(--hero-cat-a) 28%, transparent) 34%,
+    transparent 64%
+  );
+  background-repeat: no-repeat;
+  background-size: 140% 140%;
+  mix-blend-mode: soft-light;
+  filter: none;
+  transform: none;
+  animation: hero-category-glow-drift 6.5s ease-in-out infinite;
+}
+
+.hero-category-sheen {
+  z-index: 3;
+  background: linear-gradient(
+    105deg,
+    transparent 28%,
+    color-mix(in srgb, var(--hero-cat-glow) 70%, white) 48%,
+    transparent 68%
+  );
+  mix-blend-mode: soft-light;
+  animation: hero-category-sheen-sweep 5.8s ease-in-out infinite;
+}
+
+.hero-category-scrim {
+  z-index: 4;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.4) 0%,
+    transparent 55%
+  );
+}
+
+.hero-category-label {
+  /* Explicit pill — must not be overridden by card child rules */
+  border-radius: 9999px !important;
+  border: 1px solid color-mix(in srgb, var(--hero-cat-glow) 55%, white);
+  background-color: rgba(255, 255, 255, 0.14);
+  background-image: linear-gradient(
+    115deg,
+    color-mix(in srgb, var(--hero-cat-a) 62%, transparent) 0%,
+    color-mix(in srgb, var(--hero-cat-b) 45%, transparent) 50%,
+    color-mix(in srgb, var(--hero-cat-c) 58%, transparent) 100%
+  );
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+  letter-spacing: 0.12em;
+}
+
+html.dark .hero-category-card {
+  --hero-cat-stroke: color-mix(in srgb, var(--hero-cat-a) 68%, var(--hero-cat-c));
+  background-color: var(--color-surface-2, #1c1a22);
+  box-shadow: none;
+}
+
+html.light .hero-category-card {
+  background-color: var(--color-surface-2, #f0ece6);
+}
+
+html.dark .hero-category-wash {
+  mix-blend-mode: soft-light;
+  /* no filter — saturate() paint can escape rounded clips */
+  filter: none;
+}
+
+html.dark .hero-category-glow {
+  opacity: 1;
+}
+
+html.light .hero-category-glow {
+  opacity: 0.85;
+}
+
+html.light .hero-category-wash {
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cta-primary,
   .cta-primary::after,
@@ -988,12 +1288,25 @@ html.light {
   .text-pack-cta-breathe,
   .pack-badge-alive,
   .trend-rail,
-  .offer-glow::before {
+  .offer-glow::before,
+  .metric-tile-gradient-a,
+  .metric-tile-gradient-b,
+  .metric-tile-gradient-c,
+  .metric-tile-gradient-d,
+  .metric-tile-sheen,
+  .hero-category-wash,
+  .hero-category-glow,
+  .hero-category-sheen,
+  .trending-strip-marquee {
     animation: none !important;
+  }
+
+  .hero-category-card:hover {
+    transform: none;
   }
 }
 
-/* ─── RHYTHM Admin CMS ─── */
+/* ─── PRAGVI Admin CMS ─── */
 .admin-root {
   --admin-bg: #f6f4f1;
   --admin-surface: #ffffff;

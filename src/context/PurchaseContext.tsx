@@ -11,14 +11,19 @@ import {
 } from "react";
 import { userOwnsProductId } from "@/catalog/contentPackMigration";
 import type { StorefrontCatalog } from "@/catalog/mapAdminToStorefront";
+import { createClient } from "@/lib/supabase/client";
 import type { CartItem, PurchasedItem } from "@/types";
-
-const STORAGE_KEY = "rhythm-purchases-v1";
 
 type PurchaseContextValue = {
   purchases: PurchasedItem[];
   hydrated: boolean;
   ownsProductId: (id: string) => boolean;
+  /** Reloads purchases from verified server entitlements. */
+  refreshPurchases: () => Promise<void>;
+  /**
+   * Legacy local merge helper — must not be used as payment fulfillment.
+   * Kept so accidental demo checkout paths stay grep-detectable / disabled.
+   */
   addPurchasesFromCart: (
     items: CartItem[],
     catalog: StorefrontCatalog,
@@ -49,29 +54,81 @@ function cartLineToPurchase(
   };
 }
 
+async function fetchServerPurchases(): Promise<
+  { ok: true; purchases: PurchasedItem[]; status: number } | { ok: false; status: number }
+> {
+  const res = await fetch("/api/account/purchases", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (res.status === 401) {
+    return { ok: true, purchases: [], status: 401 };
+  }
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    purchases?: PurchasedItem[];
+  } | null;
+  if (!res.ok || !body?.ok || !Array.isArray(body.purchases)) {
+    return { ok: false, status: res.status };
+  }
+  return { ok: true, purchases: body.purchases, status: res.status };
+}
+
 export function PurchaseProvider({ children }: { children: ReactNode }) {
   const [purchases, setPurchases] = useState<PurchasedItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  useEffect(() => {
+  const refreshPurchases = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        setPurchases([]);
-      } else {
-        const parsed = JSON.parse(raw) as PurchasedItem[];
-        setPurchases(Array.isArray(parsed) ? parsed : []);
+      const result = await fetchServerPurchases();
+      if (result.ok) {
+        // 401 → empty list (never keep prior user's entitlements).
+        setPurchases(result.purchases);
       }
+      // Transient non-auth failures: keep prior list only while still signed in;
+      // auth listener clears on SIGNED_OUT before a 401 refresh.
     } catch {
-      setPurchases([]);
+      // Network error — do not invent ownership; leave state unchanged.
+    } finally {
+      setHydrated(true);
     }
-    setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(purchases));
-  }, [purchases, hydrated]);
+    void refreshPurchases();
+  }, [refreshPurchases]);
+
+  // Clear/replace purchases on auth changes so A→B account switches cannot leak.
+  useEffect(() => {
+    let cancelled = false;
+    let subscription: { unsubscribe: () => void } | null = null;
+    try {
+      const supabase = createClient();
+      const { data } = supabase.auth.onAuthStateChange((event) => {
+        if (cancelled) return;
+        if (event === "SIGNED_OUT") {
+          setPurchases([]);
+          setHydrated(true);
+          return;
+        }
+        if (
+          event === "SIGNED_IN" ||
+          event === "TOKEN_REFRESHED" ||
+          event === "USER_UPDATED"
+        ) {
+          void refreshPurchases();
+        }
+      });
+      subscription = data.subscription;
+    } catch {
+      // Auth client unavailable — leave purchases empty after initial refresh.
+    }
+    return () => {
+      cancelled = true;
+      subscription?.unsubscribe();
+    };
+  }, [refreshPurchases]);
 
   const ownsProductId = useCallback(
     (id: string) =>
@@ -82,6 +139,7 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
     [purchases],
   );
 
+  /** Not used for Razorpay fulfillment — server entitlements are authoritative. */
   const addPurchasesFromCart = useCallback(
     (items: CartItem[], catalog: StorefrontCatalog) => {
       const purchasedAt = new Date().toISOString().slice(0, 10);
@@ -98,7 +156,6 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
         for (const item of items) {
           pushIfNew(cartLineToPurchase(item, purchasedAt));
 
-          // Expand bundles into individual entitlements.
           if (
             item.productType === "BUNDLE" ||
             (item.type === "product" &&
@@ -139,9 +196,10 @@ export function PurchaseProvider({ children }: { children: ReactNode }) {
       purchases,
       hydrated,
       ownsProductId,
+      refreshPurchases,
       addPurchasesFromCart,
     }),
-    [purchases, hydrated, ownsProductId, addPurchasesFromCart],
+    [purchases, hydrated, ownsProductId, refreshPurchases, addPurchasesFromCart],
   );
 
   return (

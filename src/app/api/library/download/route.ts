@@ -11,7 +11,19 @@ import { createEntitledMasterDownload } from "@/lib/commerce/download";
 export const runtime = "nodejs";
 
 async function handle(request: Request) {
-  const supabase = await createClient();
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Auth is not configured",
+        code: "AUTH_MISCONFIGURED",
+      },
+      { status: 503 },
+    );
+  }
   const {
     data: { user },
   } = await supabase.auth.getUser();

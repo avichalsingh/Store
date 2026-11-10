@@ -5,6 +5,7 @@ import {
   type CatalogProductRow,
   type CatalogRelationshipRow,
 } from "@/catalog/mapSupabaseProduct";
+import { filterPublicCatalogProducts } from "@/catalog/publicCatalogPublication";
 import { sanitizePublicMediaUrl } from "@/lib/security/publicMedia";
 import { createServiceClient } from "@/lib/supabase/admin";
 import type { CatalogProduct } from "@/types";
@@ -152,10 +153,12 @@ export async function GET() {
     const mediaRows = await loadPublicMediaRows(mediaAssetIds);
 
     const products = hardenPublicProducts(
-      mapCatalogViewsToProducts(
-        productRows,
-        (relationshipsResult.data ?? []) as CatalogRelationshipRow[],
-        mediaRows,
+      filterPublicCatalogProducts(
+        mapCatalogViewsToProducts(
+          productRows,
+          (relationshipsResult.data ?? []) as CatalogRelationshipRow[],
+          mediaRows,
+        ),
       ),
     );
 

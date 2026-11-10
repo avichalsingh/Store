@@ -20,10 +20,31 @@ import {
   getPublicRazorpayKeyId,
   getRazorpayConfig,
 } from "@/lib/commerce/razorpay";
+import { isPublicCatalogPublishable } from "@/catalog/publicCatalogPublication";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  // Auth before payment-provider config so missing Razorpay keys never mask AUTH_REQUIRED.
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Auth is not configured", code: "AUTH_MISCONFIGURED" },
+      { status: 503 },
+    );
+  }
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json(
+      { ok: false, error: "Sign in required", code: "AUTH_REQUIRED" },
+      { status: 401 },
+    );
+  }
+
   const razorpay = getRazorpayConfig();
   if (!razorpay.ok) {
     return NextResponse.json({ ok: false, error: razorpay.error }, { status: 503 });
@@ -33,17 +54,6 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { ok: false, error: "Razorpay public key is not configured" },
       { status: 503 },
-    );
-  }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json(
-      { ok: false, error: "Sign in required", code: "AUTH_REQUIRED" },
-      { status: 401 },
     );
   }
 
@@ -82,7 +92,7 @@ export async function POST(request: Request) {
 
   const { data: products, error: productsErr } = await admin
     .from("products")
-    .select("id, name, status, pricing")
+    .select("id, name, status, pricing, tags, slug")
     .in("id", idsToLoad);
 
   if (productsErr) {
@@ -126,6 +136,22 @@ export async function POST(request: Request) {
     if (!row) {
       return NextResponse.json(
         { ok: false, error: `Unknown product ${item.productId}` },
+        { status: 400 },
+      );
+    }
+    if (
+      !isPublicCatalogPublishable({
+        id: row.id as string,
+        slug: (row.slug as string | undefined) ?? null,
+        status: (row.status as string | undefined) ?? null,
+        tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+      })
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Product ${item.productId} is not available for purchase`,
+        },
         { status: 400 },
       );
     }

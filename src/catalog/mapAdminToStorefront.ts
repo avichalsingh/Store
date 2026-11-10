@@ -6,6 +6,12 @@ import type {
 } from "@/admin/types";
 import { resolveCollectionThumbnail } from "@/admin/lib/resolveThumbnails";
 import { enrichCollection, enrichVideo } from "@/data/conversion";
+import {
+  isPublishablePerformanceMode,
+  mergePublicPerformance,
+  publicCreatorActivity,
+  publicPerformance,
+} from "@/catalog/publicPerformance";
 import { characters as staticCharacters } from "@/data/characters";
 import { collections as staticCollections } from "@/data/collections";
 import { videos as staticVideos } from "@/data/videos";
@@ -32,6 +38,10 @@ import { collectionToStorefrontPricing } from "@/admin/lib/collectionPricing";
 import { resolveProductMedia } from "@/catalog/resolveProductMedia";
 import { isSeedPlaceholderVideo } from "@/admin/lib/mediaPreview";
 import { toPublicCaptionPackPreviewItem } from "@/catalog/contentPackTeaser";
+import {
+  filterPublicCatalogProducts,
+  isPublicCatalogPublishable,
+} from "@/catalog/publicCatalogPublication";
 import type { ProductType } from "@/catalog/productTypes";
 
 function dedupeCatalogProductsBySlug(
@@ -456,6 +466,10 @@ function mapPerformance(
 ): VideoProduct["performance"] | undefined {
   const perf = p.performance;
   if (!perf) return undefined;
+  const mode = perf.mode ?? "demo";
+  // Never invent storefront merchandising metrics from demo/seed CMS rows.
+  if (!isPublishablePerformanceMode(mode)) return undefined;
+  if (typeof perf.plays !== "string" || !perf.plays.trim()) return undefined;
   const type =
     perf.status === "trending" || perf.status === "viral"
       ? ("trending" as const)
@@ -476,13 +490,15 @@ function mapPerformance(
     supportingText: perf.supportingText,
     momentumLabel: perf.momentumLabel,
     engagementText: perf.engagementText,
-    mode: "demo",
+    mode,
   };
 }
 
 function mapActivity(p: AdminProduct): VideoProduct["activity"] | undefined {
   const a = p.creatorActivity;
   if (!a) return undefined;
+  const mode = a.mode ?? "demo";
+  if (!isPublishablePerformanceMode(mode)) return undefined;
   const activityLevel =
     a.activityLevel === "high"
       ? ("high" as const)
@@ -490,7 +506,7 @@ function mapActivity(p: AdminProduct): VideoProduct["activity"] | undefined {
         ? ("steady" as const)
         : ("rising" as const);
   return {
-    mode: "demo",
+    mode,
     addedThisWeek: a.addedThisWeek,
     saved: a.saved,
     last24h: a.last24h,
@@ -556,13 +572,13 @@ export function adminProductToVideo(
     access: product.access || "Instant access",
     performance: mapPerformance(product),
     activity: mapActivity(product),
-    showCardMetrics: Boolean(product.performance),
+    showCardMetrics: false,
     pdpValueCards: mapPdpValueCards(product),
     fileDetails: mapFileDetails(product),
     ...relations,
   };
 
-  // Never fall back to static demo media OR master when a CMS media asset is attached.
+  // Media enrichment only — never merge seed/demo social-proof metrics.
   const enriched = enrichVideo(base);
   const hasCmsMedia = Boolean(product.mediaAssetId);
   const previewVideo =
@@ -576,10 +592,10 @@ export function adminProductToVideo(
       ? undefined
       : previewVideo;
 
-  const performance = mergePerformance(
-    base.performance,
-    enriched.performance,
-  );
+  const performance = mergePublicPerformance(base.performance, undefined, {
+    allowDemoFallback: false,
+  });
+  const activity = publicCreatorActivity(base.activity);
 
   return {
     ...enriched,
@@ -588,34 +604,17 @@ export function adminProductToVideo(
     pricing: base.pricing ?? enriched.pricing,
     offer: base.offer ?? enriched.offer,
     performance,
-    activity: base.activity ?? enriched.activity,
-    creatorRating: enriched.creatorRating ?? base.creatorRating,
+    activity,
+    // Seed ratings / rotating proof messages stay off the public catalog.
+    creatorRating: undefined,
     creatorInsights: enriched.creatorInsights ?? base.creatorInsights,
-    socialRotation: enriched.socialRotation ?? base.socialRotation,
+    socialRotation: undefined,
+    showCardMetrics: Boolean(publicPerformance(performance)),
     pdpValueCards: base.pdpValueCards ?? enriched.pdpValueCards,
     fileDetails: base.fileDetails ?? enriched.fileDetails,
     access: base.access || enriched.access,
     thumbnail: base.thumbnail || (hasCmsMedia ? "" : enriched.thumbnail),
     previewVideo: safePreview,
-  };
-}
-
-function mergePerformance(
-  cms: VideoProduct["performance"] | undefined,
-  fallback: VideoProduct["performance"] | undefined,
-): VideoProduct["performance"] | undefined {
-  if (!cms) return fallback;
-  if (!fallback) return cms;
-  return {
-    ...fallback,
-    ...cms,
-    primaryLabel: cms.primaryLabel || fallback.primaryLabel,
-    insight: cms.insight || fallback.insight,
-    badge: cms.badge || fallback.badge,
-    supportingText: cms.supportingText || fallback.supportingText,
-    momentumLabel: cms.momentumLabel || fallback.momentumLabel,
-    engagementText: cms.engagementText || fallback.engagementText,
-    aboveAverage: cms.aboveAverage || fallback.aboveAverage,
   };
 }
 
@@ -650,13 +649,31 @@ export function adminCollectionToStorefront(
     collection.characterRules?.[0]?.characterId ??
     products.find((p) => collection.productIds.includes(p.id))?.characterId;
   const storefrontPricing = collectionToStorefrontPricing(collection);
+  const publishableProductIds = new Set(
+    products
+      .filter((p) =>
+        isPublicCatalogPublishable({
+          id: p.id,
+          slug: p.slug,
+          status: p.status,
+          tags: p.tags,
+        }),
+      )
+      .map((p) => p.id),
+  );
+  // When products[] is empty (Supabase-assembled catalog), keep ids; callers
+  // filter against the live product set below.
+  const videoIds =
+    publishableProductIds.size > 0
+      ? collection.productIds.filter((id) => publishableProductIds.has(id))
+      : [...collection.productIds];
   const base: Collection = {
     id: collection.id,
     title: collection.name,
     slug: collection.slug,
     description: collection.description,
     coverImage: coverImage || collection.coverImage,
-    videoIds: [...collection.productIds],
+    videoIds,
     characterId,
     price: storefrontPricing.price,
     originalPrice: storefrontPricing.originalPrice,
@@ -719,18 +736,27 @@ export function buildStorefrontCatalog(
   characters: AdminCharacter[],
   imagePdpSettings: ImagePdpGlobalSettings = defaultImagePdpGlobalSettings(),
 ): StorefrontCatalog {
-  const activeProducts = products.filter((p) => p.status === "active");
+  const activeProducts = products.filter((p) =>
+    isPublicCatalogPublishable({
+      id: p.id,
+      slug: p.slug,
+      status: p.status,
+      tags: p.tags,
+    }),
+  );
   const updatedAtById = new Map(
     products.map((p) => [p.id, p.updatedAt ?? p.createdAt ?? ""]),
   );
   const cmsManagedIds = new Set(products.map((p) => p.id));
   const cmsManagedSlugs = new Set(products.map((p) => p.slug));
+  const publishableIds = new Set(activeProducts.map((p) => p.id));
 
   // Recompute collectionIds from admin collections (source of truth)
   const collectionMembership = new Map<string, string[]>();
   for (const col of collections) {
     if (col.status !== "active") continue;
     for (const pid of col.productIds) {
+      if (!publishableIds.has(pid)) continue;
       const list = collectionMembership.get(pid) ?? [];
       list.push(col.id);
       collectionMembership.set(pid, list);
@@ -757,14 +783,16 @@ export function buildStorefrontCatalog(
     }
   }
 
-  const staticExtras = staticVideos
-    .filter((v) => !cmsManagedIds.has(v.id) && !cmsManagedSlugs.has(v.slug))
-    .map(
-      (v): VideoProduct => ({
-        ...v,
-        productType: "VIDEO",
-      }),
-    );
+  const staticExtras = filterPublicCatalogProducts(
+    staticVideos
+      .filter((v) => !cmsManagedIds.has(v.id) && !cmsManagedSlugs.has(v.slug))
+      .map(
+        (v): VideoProduct => ({
+          ...v,
+          productType: "VIDEO",
+        }),
+      ),
+  );
 
   const allProducts = dedupeCatalogProductsBySlug(
     [...catalogProducts, ...staticExtras],
@@ -774,6 +802,7 @@ export function buildStorefrontCatalog(
   const videos = allProducts.filter(
     (p): p is VideoProduct => p.productType === "VIDEO",
   );
+  const publicIds = new Set(allProducts.map((p) => p.id));
 
   const activeCollections = collections.filter((c) => c.status === "active");
   const cmsCollections = activeCollections.map((c) =>
@@ -784,7 +813,12 @@ export function buildStorefrontCatalog(
   const collectionExtras = staticCollections.filter(
     (c) => !managedColIds.has(c.id) && !managedColSlugs.has(c.slug),
   );
-  const storeCollections = [...cmsCollections, ...collectionExtras];
+  const storeCollections = [...cmsCollections, ...collectionExtras].map(
+    (collection) => ({
+      ...collection,
+      videoIds: collection.videoIds.filter((id) => publicIds.has(id)),
+    }),
+  );
 
   const visibleCharacters = characters.filter(
     (c) => c.status === "active" || c.status === "hidden",
@@ -858,11 +892,12 @@ export function assembleStorefrontCatalogFromProducts(
   characters: AdminCharacter[],
   imagePdpSettings: ImagePdpGlobalSettings = defaultImagePdpGlobalSettings(),
 ): StorefrontCatalog {
-  const allProducts = catalogProducts;
+  const allProducts = filterPublicCatalogProducts(catalogProducts);
   const productsBySlug = new Map(allProducts.map((p) => [p.slug, p]));
   const videos = allProducts.filter(
     (p): p is VideoProduct => p.productType === "VIDEO",
   );
+  const publicProductIds = new Set(allProducts.map((p) => p.id));
 
   const activeCollections = collections.filter((c) => c.status === "active");
   // Collection membership visuals need AdminProduct[]; empty list keeps covers
@@ -875,7 +910,13 @@ export function assembleStorefrontCatalogFromProducts(
   const collectionExtras = staticCollections.filter(
     (c) => !managedColIds.has(c.id) && !managedColSlugs.has(c.slug),
   );
-  const storeCollections = [...cmsCollections, ...collectionExtras];
+  const storeCollections = [...cmsCollections, ...collectionExtras].map(
+    (collection) => ({
+      ...collection,
+      // Only surface members that exist in the public product catalogue.
+      videoIds: collection.videoIds.filter((id) => publicProductIds.has(id)),
+    }),
+  );
 
   const visibleCharacters = characters.filter(
     (c) => c.status === "active" || c.status === "hidden",

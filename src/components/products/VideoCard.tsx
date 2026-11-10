@@ -7,6 +7,7 @@ import { AddToCartButton } from "@/components/ui/AddToCartButton";
 import { VideoPreview } from "@/components/products/VideoPreview";
 import { PerformanceCardOverlay } from "@/components/products/PerformanceCardOverlay";
 import { TrendingBadgeLabel } from "@/components/motion/TrendingBadgeLabel";
+import { publicPerformance } from "@/catalog/publicPerformance";
 import type { VideoProduct } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +24,8 @@ export function VideoCard({
   priority,
   showProof = true,
 }: VideoCardProps) {
-  const showMetrics = showProof && video.showCardMetrics && video.performance;
+  const performance = publicPerformance(video.performance);
+  const showMetrics = showProof && video.showCardMetrics && Boolean(performance);
 
   return (
     <article
@@ -45,9 +47,9 @@ export function VideoCard({
         />
 
         <div className="absolute left-2.5 top-2.5 z-10 flex max-w-[85%] flex-wrap gap-1.5">
-          {video.performance ? (
+          {performance ? (
             <span className="inline-flex items-center rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white ring-1 ring-white/15 backdrop-blur-md">
-              <TrendingBadgeLabel badge={video.performance.badge} />
+              <TrendingBadgeLabel badge={performance.badge} />
             </span>
           ) : (
             <>
@@ -57,9 +59,9 @@ export function VideoCard({
           )}
         </div>
 
-        {showMetrics && video.performance && (
+        {showMetrics && performance && (
           <PerformanceCardOverlay
-            performance={video.performance}
+            performance={performance}
             variant="card"
           />
         )}

@@ -489,9 +489,21 @@ const rawVideos: RawVideo[] = [
   },
 ];
 
-export const videos: VideoProduct[] = rawVideos.map((video) =>
-  enrichVideo({ ...video, productType: "VIDEO" }),
-);
+/**
+ * Static catalog used for SSG params and hero media fallback.
+ * Strip seed conversion metrics so public surfaces never show demo social proof.
+ */
+export const videos: VideoProduct[] = rawVideos.map((video) => {
+  const enriched = enrichVideo({ ...video, productType: "VIDEO" });
+  return {
+    ...enriched,
+    performance: undefined,
+    activity: undefined,
+    socialRotation: undefined,
+    creatorRating: undefined,
+    showCardMetrics: false,
+  };
+});
 
 export function getVideoBySlug(slug: string) {
   return videos.find((v) => v.slug === slug);

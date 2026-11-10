@@ -22,6 +22,7 @@ import { AdminPageHeader } from "@/admin/components/ui/AdminPageHeader";
 import { AdminSaveBar } from "@/admin/components/ui/AdminSaveBar";
 import { discountPct, slugify, uid } from "@/admin/lib/format";
 import { normalizeAdminProduct } from "@/admin/lib/normalizeProduct";
+import { fetchAdminPrivatePayload } from "@/admin/lib/privateProductPayloads";
 import { publishProductToCatalog } from "@/admin/lib/publishToCatalog";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import type { AdminProduct } from "@/admin/types";
@@ -34,6 +35,7 @@ import {
   getProductTypeConfig,
   type ProductType,
 } from "@/catalog/productTypes";
+import { mergePrivatePaidProductPayload } from "@/catalog/publicSafeProduct";
 import { Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -138,11 +140,38 @@ export function ProductEditor({
   useEffect(() => {
     if (!hydrated) return;
     if (productId && !existing) return;
-    const initial = existing
-      ? structuredClone(existing)
-      : blankProduct(productType ?? "VIDEO");
-    setDraft(initial);
-    setBaseline(JSON.stringify(initial));
+    let cancelled = false;
+
+    const init = async () => {
+      const initial = existing
+        ? structuredClone(existing)
+        : blankProduct(productType ?? "VIDEO");
+
+      // Shared CMS state is public-safe. Hydrate private seed bodies only into
+      // this editor draft via the authenticated admin API — never into
+      // AdminProvider / localStorage.
+      const needsPrivate =
+        !!productId &&
+        (initial.productType === "PROMPT" ||
+          initial.productType === "CAPTION_PACK");
+      if (needsPrivate) {
+        const payload = await fetchAdminPrivatePayload(productId);
+        if (cancelled) return;
+        const merged = mergePrivatePaidProductPayload(initial, payload);
+        setDraft(merged);
+        setBaseline(JSON.stringify(merged));
+        return;
+      }
+
+      if (cancelled) return;
+      setDraft(initial);
+      setBaseline(JSON.stringify(initial));
+    };
+
+    void init();
+    return () => {
+      cancelled = true;
+    };
     // Only re-init when switching products / hydration — not on every store sync
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, productId, productType]);

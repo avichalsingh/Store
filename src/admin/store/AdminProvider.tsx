@@ -10,25 +10,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import { createSeedState, type AdminCmsState } from "@/admin/data/seed";
 import {
   defaultImagePdpGlobalSettings,
   type ImagePdpGlobalSettings,
 } from "@/catalog/imagePdpTypes";
 import { marketplaceSeedProducts } from "@/admin/data/marketplaceSeed";
-import {
-  normalizePendingChanges,
-  normalizePriceHistory,
-  normalizeTool,
-  normalizeTools,
-  normalizeToolsSettings,
-} from "@/admin/lib/normalizeTool";
-import type {
-  AiTool,
-  ToolPendingChange,
-  ToolsSettings,
-} from "@/catalog/tools/types";
-import { toolsSeedProducts } from "@/admin/data/toolsSeed";
 import { uid } from "@/admin/lib/format";
 import {
   normalizeCharacter,
@@ -78,18 +66,34 @@ import {
   type WatermarkRefreshProgress,
 } from "@/admin/lib/watermarkPreviewRefresh";
 import { CMS_STORAGE_KEY } from "@/catalog/cmsEvents";
-import type {
-  AdminCampaign,
-  AdminCharacter,
-  AdminCollection,
-  AdminNotification,
-  AdminOffer,
-  AdminProduct,
-  Announcement,
-  GlobalMediaSettings,
-  HomepageHeroConfig,
-  HomepageSection,
-  MediaAsset,
+import {
+  homepageHeroNeedsLegacyCopyMigration,
+  isHomepageHeroCollageCurated,
+  normalizeHomepageHero,
+  normalizeHomepageHeroCollage,
+  normalizeHomepageSections,
+} from "@/catalog/homepageConfig";
+import {
+  DEFAULT_SITE_CONTENT,
+  normalizeSiteContent,
+  type SiteContentConfig,
+} from "@/catalog/siteContent";
+import { stripPrivatePaidProducts } from "@/catalog/publicSafeProduct";
+import { isAdminPrivateContentPath } from "@/admin/lib/privateProductPayloads";
+import {
+  normalizeStoreGeneralSettings,
+  type AdminCampaign,
+  type AdminCharacter,
+  type AdminCollection,
+  type AdminNotification,
+  type AdminOffer,
+  type AdminProduct,
+  type Announcement,
+  type GlobalMediaSettings,
+  type HomepageHeroConfig,
+  type HomepageSection,
+  type MediaAsset,
+  type StoreGeneralSettings,
 } from "@/admin/types";
 
 const STORAGE_KEY = CMS_STORAGE_KEY;
@@ -116,7 +120,7 @@ type AdminContextValue = AdminCmsState & {
   toasts: AdminToast[];
   pushToast: (message: string, tone?: ToastTone) => void;
   dismissToast: (id: string) => void;
-  upsertProduct: (product: AdminProduct, toast?: string) => void;
+  upsertProduct: (product: AdminProduct, toast?: string | null) => void;
   duplicateProduct: (id: string) => AdminProduct | null;
   archiveProduct: (id: string) => void;
   deleteProduct: (id: string) => void;
@@ -125,7 +129,10 @@ type AdminContextValue = AdminCmsState & {
   deleteCharacter: (id: string) => void;
   assignProductsToCharacter: (characterId: string, productIds: string[]) => void;
   removeProductFromCharacter: (productId: string, characterId: string) => void;
-  upsertCollection: (collection: AdminCollection, toast?: string) => void;
+  upsertCollection: (
+    collection: AdminCollection,
+    toast?: string | null,
+  ) => void;
   duplicateCollection: (id: string) => AdminCollection | null;
   deleteCollection: (id: string) => void;
   upsertCampaign: (campaign: AdminCampaign, toast?: string) => void;
@@ -136,6 +143,13 @@ type AdminContextValue = AdminCmsState & {
   deleteAnnouncement: (id: string) => void;
   setHomepageSections: (sections: HomepageSection[], toast?: string | null) => void;
   setHomepageHero: (hero: HomepageHeroConfig, toast?: string | null) => void;
+  /**
+   * Ephemeral admin-only storefront preview of the local homepage draft.
+   * Not persisted to rhythm-admin-cms-v8. Default false → published config.
+   */
+  homepagePreviewDraft: boolean;
+  setHomepagePreviewDraft: (enabled: boolean) => void;
+  setSiteContent: (content: SiteContentConfig, toast?: string | null) => void;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   resetStore: () => void;
@@ -143,6 +157,7 @@ type AdminContextValue = AdminCmsState & {
   updateMediaAsset: (id: string, partial: Partial<MediaAsset>, toast?: string | null) => void;
   deleteMediaAsset: (id: string) => void;
   setMediaSettings: (settings: GlobalMediaSettings, toast?: string) => void;
+  setStoreSettings: (settings: StoreGeneralSettings, toast?: string) => void;
   /**
    * Explicit bulk refresh of eligible durable video previews after watermark/quality
    * settings change. Never called automatically from setMediaSettings.
@@ -185,14 +200,6 @@ type AdminContextValue = AdminCmsState & {
   attachImageAssetToAiProduct: (productId: string, assetId: string) => void;
   /** Remove a Media Library image from an AI Image product's selected assets. */
   detachImageAssetFromAiProduct: (productId: string, assetId: string) => void;
-  upsertAiTool: (tool: AiTool, toast?: string) => void;
-  deleteAiTool: (id: string) => void;
-  setToolsSettings: (settings: ToolsSettings, toast?: string | null) => void;
-  resolveToolPendingChange: (
-    changeId: string,
-    action: "approve" | "reject" | "edit",
-    edited?: Partial<AiTool>,
-  ) => void;
 };
 
 const AdminContext = createContext<AdminContextValue | null>(null);
@@ -285,17 +292,26 @@ function probeImageFile(
   });
 }
 
+/**
+ * True only when the snapshot is unusable (missing required shapes).
+ * Empty products/collections/characters arrays are valid — do not
+ * force a full demo reseed (that made demo inventory look like real CMS data).
+ */
 function needsReseed(parsed: unknown): boolean {
   if (!parsed || typeof parsed !== "object") return true;
   const state = parsed as Partial<AdminCmsState>;
-  if (!Array.isArray(state.mediaAssets) || state.mediaAssets.length === 0) return true;
+  if (!Array.isArray(state.products)) return true;
+  if (!Array.isArray(state.mediaAssets)) return true;
   if (!state.mediaSettings) return true;
-  if (!Array.isArray(state.collections) || state.collections.length === 0) return true;
-  if (state.collections.some((c) => !c || typeof c !== "object" || !("coverMode" in c))) {
+  if (!Array.isArray(state.collections)) return true;
+  if (
+    state.collections.some(
+      (c) => !c || typeof c !== "object" || !("coverMode" in c),
+    )
+  ) {
     return true;
   }
-  if (!Array.isArray(state.characters) || state.characters.length === 0) return true;
-  if (!Array.isArray(state.aiTools)) return true;
+  if (!Array.isArray(state.characters)) return true;
   return false;
 }
 
@@ -344,17 +360,6 @@ function ensureImagePdpSettings(
   };
 }
 
-function ensureToolsSeed(tools: AiTool[]): AiTool[] {
-  const byId = new Map(tools.map((t) => [t.id, t]));
-  let changed = false;
-  for (const seed of toolsSeedProducts) {
-    if (!byId.has(seed.id)) {
-      byId.set(seed.id, normalizeTool(seed));
-      changed = true;
-    }
-  }
-  return changed ? Array.from(byId.values()) : tools;
-}
 
 function normalizeLoadedState(state: AdminCmsState): AdminCmsState {
   const products = ensureMarketplaceSeedProducts(
@@ -410,37 +415,84 @@ function normalizeLoadedState(state: AdminCmsState): AdminCmsState {
   });
   return {
     ...state,
-    products: syncedProducts,
+    // Strip private paid text from shared CMS hydrate (cleans legacy LS).
+    products: stripPrivatePaidProducts(syncedProducts),
     collections,
     characters,
     mediaAssets,
+    homepageSections: normalizeHomepageSections(state.homepageSections),
+    homepageHero: normalizeHomepageHero(state.homepageHero),
+    siteContent: normalizeSiteContent(
+      state.siteContent ?? DEFAULT_SITE_CONTENT,
+    ),
     imagePdpSettings: ensureImagePdpSettings(state.imagePdpSettings),
-    aiTools: ensureToolsSeed(normalizeTools(state.aiTools ?? [])),
-    toolsSettings: normalizeToolsSettings(state.toolsSettings),
-    toolPendingChanges: normalizePendingChanges(state.toolPendingChanges),
-    toolPriceHistory: normalizePriceHistory(state.toolPriceHistory),
+    storeSettings: normalizeStoreGeneralSettings(state.storeSettings),
   };
 }
 
-function persistCmsState(state: AdminCmsState) {
+function persistCmsState(
+  state: AdminCmsState,
+  options?: {
+    /** When true, empty collage may replace a curated collage (explicit hero save). */
+    allowEmptyHeroCollage?: boolean;
+  },
+) {
   const mediaAssets = sanitizeMediaAssetsForStorage(state.mediaAssets);
-  const products = state.products.map((p) => ({
-    ...p,
-    media: {
-      ...p.media,
-      thumbnail:
-        p.media.thumbnail?.startsWith("blob:") ? "" : p.media.thumbnail,
-      previewVideo:
-        !p.media.previewVideo ||
-        p.media.previewVideo.startsWith("blob:") ||
-        isSeedPlaceholderVideo(p.media.previewVideo)
-          ? undefined
-          : p.media.previewVideo,
-    },
-  }));
+  // Always persist public-safe products to the shared CMS key.
+  // Private prompt/caption bodies never enter localStorage.
+  const products = stripPrivatePaidProducts(
+    state.products.map((p) => ({
+      ...p,
+      media: {
+        ...p.media,
+        thumbnail:
+          p.media.thumbnail?.startsWith("blob:") ? "" : p.media.thumbnail,
+        previewVideo:
+          !p.media.previewVideo ||
+          p.media.previewVideo.startsWith("blob:") ||
+          isSeedPlaceholderVideo(p.media.previewVideo)
+            ? undefined
+            : p.media.previewVideo,
+      },
+    })),
+  );
+  // Always re-normalize hero so additive fields (e.g. collage) are not
+  // dropped when an older in-memory snapshot is persisted.
+  let homepageHero = normalizeHomepageHero(state.homepageHero);
+  // Multi-tab / background CMS writes can still hold an empty collage while
+  // another tab just saved curated tiles. Preserve curated collage unless this
+  // write is an explicit hero save that intentionally cleared it.
+  if (
+    !options?.allowEmptyHeroCollage &&
+    !isHomepageHeroCollageCurated(homepageHero.collage)
+  ) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const prev = JSON.parse(raw) as { homepageHero?: unknown };
+        const prevCollage = normalizeHomepageHeroCollage(
+          prev.homepageHero &&
+            typeof prev.homepageHero === "object" &&
+            "collage" in (prev.homepageHero as object)
+            ? (prev.homepageHero as { collage?: unknown }).collage
+            : undefined,
+        );
+        if (isHomepageHeroCollageCurated(prevCollage)) {
+          homepageHero = { ...homepageHero, collage: prevCollage };
+        }
+      }
+    } catch {
+      // Ignore corrupt LS; write the normalized in-memory hero.
+    }
+  }
   localStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify({ ...state, mediaAssets, products }),
+    JSON.stringify({
+      ...state,
+      mediaAssets,
+      products,
+      homepageHero,
+    }),
   );
 }
 
@@ -450,7 +502,14 @@ function loadState(): AdminCmsState {
     if (raw) {
       const parsed = JSON.parse(raw) as unknown;
       if (!needsReseed(parsed)) {
-        return normalizeLoadedState(parsed as AdminCmsState);
+        const cms = parsed as AdminCmsState;
+        const migrated = normalizeLoadedState(cms);
+        // Persist only when exact legacy seed hero copy was rewritten —
+        // leaves custom admin headlines/CTAs and the rest of CMS untouched.
+        if (homepageHeroNeedsLegacyCopyMigration(cms.homepageHero)) {
+          persistCmsState(migrated);
+        }
+        return migrated;
       }
     }
 
@@ -537,11 +596,16 @@ function syncProductUsage(
 }
 
 export function AdminProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname() || "/";
   const [state, setState] = useState<AdminCmsState>(() => createSeedState());
   const [hydrated, setHydrated] = useState(false);
   const [toasts, setToasts] = useState<AdminToast[]>([]);
+  /** Admin-only: when true, storefront HomepageComposer uses local draft. */
+  const [homepagePreviewDraft, setHomepagePreviewDraftState] = useState(false);
   const [watermarkRefreshProgress, setWatermarkRefreshProgress] =
     useState<WatermarkRefreshProgress | null>(null);
+  /** Allows persist to write an intentionally cleared hero collage. */
+  const allowEmptyHeroCollageRef = useRef(false);
   const cancelJobsRef = useRef<Map<string, () => void>>(new Map());
   /** AbortControllers for async preview status polls (one per asset). */
   const previewPollAbortRef = useRef<Map<string, AbortController>>(new Map());
@@ -572,17 +636,21 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       // (that loads every IndexedDB original/preview/thumb + createObjectURL and
       // blocked the entire Admin UI). Media surfaces restore bytes on demand via
       // restoreObjectUrl() (MediaLibraryCardVisual, MediaPreviewPlayer, etc.).
+      // Private prompt/caption bodies stay server-only — never merge into CMS state.
       const loaded = loadState();
       const syncedMedia = recomputeMediaUsage(
         loaded.mediaAssets,
         loaded.products,
       );
-      const products = loaded.products.map((p) => {
-        if (!p.mediaAssetId) return p;
-        const asset = syncedMedia.find((a) => a.id === p.mediaAssetId);
-        if (!asset) return p;
-        return { ...p, media: assetToProductMedia(asset) };
-      });
+      const products = stripPrivatePaidProducts(
+        loaded.products.map((p) => {
+          if (!p.mediaAssetId) return p;
+          const asset = syncedMedia.find((a) => a.id === p.mediaAssetId);
+          if (!asset) return p;
+          return { ...p, media: assetToProductMedia(asset) };
+        }),
+      );
+
       if (cancelled) return;
       setState({
         ...loaded,
@@ -608,9 +676,23 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Same-tab route changes: always keep shared CMS products public-safe.
+  // Private seed bodies are fetched per-editor via /api/admin/private-payloads.
   useEffect(() => {
     if (!hydrated) return;
-    persistCmsState(state);
+    if (!isAdminPrivateContentPath(pathname)) {
+      setState((prev) => ({
+        ...prev,
+        products: stripPrivatePaidProducts(prev.products),
+      }));
+    }
+  }, [pathname, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const allowEmptyHeroCollage = allowEmptyHeroCollageRef.current;
+    allowEmptyHeroCollageRef.current = false;
+    persistCmsState(state, { allowEmptyHeroCollage });
   }, [state, hydrated]);
 
   useEffect(() => {
@@ -756,6 +838,17 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         };
       });
       pushToast("Media asset deleted", "info");
+    },
+    [patch, pushToast],
+  );
+
+  const setStoreSettings = useCallback(
+    (settings: StoreGeneralSettings, toast = "General settings saved") => {
+      patch((prev) => ({
+        ...prev,
+        storeSettings: normalizeStoreGeneralSettings(settings),
+      }));
+      pushToast(toast);
     },
     [patch, pushToast],
   );
@@ -1979,16 +2072,20 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   );
 
   const upsertProduct = useCallback(
-    (product: AdminProduct, toast = "Product saved") => {
+    (product: AdminProduct, toast: string | null = "Product saved") => {
       patch((prev) => {
         const previous = prev.products.find((p) => p.id === product.id);
-        const synced = syncProductUsage(
-          prev.products,
-          prev.mediaAssets,
+        // Never retain private paid bodies in shared CMS / localStorage state.
+        const publicProduct = stripPrivatePaidProducts([
           {
             ...product,
             updatedAt: product.updatedAt || new Date().toISOString(),
           },
+        ])[0]!;
+        const synced = syncProductUsage(
+          prev.products,
+          prev.mediaAssets,
+          publicProduct,
           previous?.mediaAssetId,
         );
 
@@ -2022,7 +2119,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           characters,
         };
       });
-      pushToast(toast);
+      if (toast) pushToast(toast);
     },
     [patch, pushToast],
   );
@@ -2290,7 +2387,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   );
 
   const upsertCollection = useCallback(
-    (collection: AdminCollection, toast = "Collection saved") => {
+    (collection: AdminCollection, toast: string | null = "Collection saved") => {
       const normalized = normalizeCollection(collection);
       patch((prev) => {
         const exists = prev.collections.some((c) => c.id === normalized.id);
@@ -2303,7 +2400,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             : [normalized, ...prev.collections],
         };
       });
-      pushToast(toast);
+      if (toast) pushToast(toast);
     },
     [patch, pushToast],
   );
@@ -2423,7 +2520,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const setHomepageSections = useCallback(
     (sections: HomepageSection[], toast: string | null = "Homepage sections updated") => {
-      patch((prev) => ({ ...prev, homepageSections: sections }));
+      patch((prev) => ({
+        ...prev,
+        homepageSections: normalizeHomepageSections(sections),
+      }));
       if (toast) pushToast(toast);
     },
     [patch, pushToast],
@@ -2431,7 +2531,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const setHomepageHero = useCallback(
     (hero: HomepageHeroConfig, toast: string | null = "Hero updated") => {
-      patch((prev) => ({ ...prev, homepageHero: hero }));
+      // Explicit hero saves may clear collage; other CMS writes must not.
+      allowEmptyHeroCollageRef.current = true;
+      patch((prev) => ({
+        ...prev,
+        homepageHero: normalizeHomepageHero(hero),
+      }));
+      if (toast) pushToast(toast);
+    },
+    [patch, pushToast],
+  );
+
+  const setHomepagePreviewDraft = useCallback((enabled: boolean) => {
+    setHomepagePreviewDraftState(Boolean(enabled));
+  }, []);
+
+  const setSiteContent = useCallback(
+    (content: SiteContentConfig, toast: string | null = "Site content saved") => {
+      patch((prev) => ({
+        ...prev,
+        siteContent: normalizeSiteContent(content),
+      }));
       if (toast) pushToast(toast);
     },
     [patch, pushToast],
@@ -2465,156 +2585,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     pushToast("Store reset to seed data");
   }, [pushToast]);
 
-  const upsertAiTool = useCallback(
-    (tool: AiTool, toast = "Tool saved") => {
-      const next = normalizeTool({
-        ...tool,
-        updatedAt: new Date().toISOString(),
-      });
-      patch((prev) => {
-        const exists = prev.aiTools.some((t) => t.id === next.id);
-        return {
-          ...prev,
-          aiTools: exists
-            ? prev.aiTools.map((t) => (t.id === next.id ? next : t))
-            : [next, ...prev.aiTools],
-        };
-      });
-      pushToast(toast);
-    },
-    [patch, pushToast],
-  );
-
-  const deleteAiTool = useCallback(
-    (id: string) => {
-      patch((prev) => ({
-        ...prev,
-        aiTools: prev.aiTools.filter((t) => t.id !== id),
-        toolPendingChanges: prev.toolPendingChanges.filter(
-          (c) => c.toolId !== id,
-        ),
-      }));
-      pushToast("Tool deleted");
-    },
-    [patch, pushToast],
-  );
-
-  const setToolsSettings = useCallback(
-    (settings: ToolsSettings, toast: string | null = "Tools settings saved") => {
-      patch((prev) => ({
-        ...prev,
-        toolsSettings: normalizeToolsSettings(settings),
-      }));
-      if (toast) pushToast(toast);
-    },
-    [patch, pushToast],
-  );
-
-  const resolveToolPendingChange = useCallback(
-    (
-      changeId: string,
-      action: "approve" | "reject" | "edit",
-      edited?: Partial<AiTool>,
-    ) => {
-      patch((prev) => {
-        const change = prev.toolPendingChanges.find((c) => c.id === changeId);
-        if (!change) return prev;
-        let aiTools = prev.aiTools;
-        if (action === "approve" || action === "edit") {
-          aiTools = prev.aiTools.map((t) => {
-            if (t.id !== change.toolId) return t;
-            const detected = change.detectedSnapshot;
-            const base: AiTool = {
-              ...t,
-              pricing: {
-                ...t.pricing,
-                regularPrice:
-                  detected.regularPrice ?? t.pricing.regularPrice,
-                currentPrice:
-                  detected.currentPrice ??
-                  detected.salePrice ??
-                  t.pricing.currentPrice,
-                origin: "verified",
-              },
-              offer: {
-                ...t.offer,
-                saleActive: detected.saleActive ?? t.offer.saleActive,
-                saleTitle: detected.saleTitle ?? t.offer.saleTitle,
-                salePrice: detected.salePrice ?? t.offer.salePrice,
-                discountPercent:
-                  detected.discountPercent ?? t.offer.discountPercent,
-                saleEndDate: detected.saleEndDate ?? t.offer.saleEndDate,
-                regularPrice: detected.regularPrice ?? t.offer.regularPrice,
-                origin: "verified",
-              },
-              monitoring: {
-                ...t.monitoring,
-                status: "up_to_date",
-                lastCheckedAt: new Date().toISOString(),
-                lastVerifiedAt: new Date().toISOString(),
-                currentDetectedPrice:
-                  detected.currentPrice ?? detected.salePrice,
-              },
-              updatedAt: new Date().toISOString(),
-              ...edited,
-            };
-            return normalizeTool(base);
-          });
-        } else {
-          aiTools = prev.aiTools.map((t) =>
-            t.id === change.toolId
-              ? normalizeTool({
-                  ...t,
-                  monitoring: {
-                    ...t.monitoring,
-                    status: "up_to_date",
-                    lastCheckedAt: new Date().toISOString(),
-                  },
-                })
-              : t,
-          );
-        }
-        const historyEntry = {
-          id: uid("tph"),
-          toolId: change.toolId,
-          detectedAt: new Date().toISOString(),
-          previousValue: JSON.stringify(change.previousSnapshot),
-          newValue: JSON.stringify(change.detectedSnapshot),
-          changeType:
-            change.changeKind === "sale"
-              ? ("sale_started" as const)
-              : ("price_decrease" as const),
-          sourceUrl: change.sourceUrl,
-          confidence: change.confidence,
-          applied: action !== "reject",
-          appliedBy: "manual" as const,
-          origin: "verified" as const,
-        };
-        return {
-          ...prev,
-          aiTools,
-          toolPendingChanges: prev.toolPendingChanges.map((c) =>
-            c.id === changeId
-              ? {
-                  ...c,
-                  status: action === "reject" ? "rejected" : "approved",
-                }
-              : c,
-          ),
-          toolPriceHistory: [historyEntry, ...prev.toolPriceHistory],
-        };
-      });
-      pushToast(
-        action === "reject"
-          ? "Change rejected"
-          : action === "edit"
-            ? "Change applied with edits"
-            : "Change approved",
-      );
-    },
-    [patch, pushToast],
-  );
-
   const value = useMemo<AdminContextValue>(
     () => ({
       ...state,
@@ -2642,6 +2612,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       deleteAnnouncement,
       setHomepageSections,
       setHomepageHero,
+      homepagePreviewDraft,
+      setHomepagePreviewDraft,
+      setSiteContent,
       markNotificationRead,
       markAllNotificationsRead,
       resetStore,
@@ -2649,6 +2622,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       updateMediaAsset,
       deleteMediaAsset,
       setMediaSettings,
+      setStoreSettings,
       refreshEligibleWatermarkPreviews,
       watermarkRefreshProgress,
       setImagePdpSettings,
@@ -2660,10 +2634,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       detachMediaFromProduct,
       attachImageAssetToAiProduct,
       detachImageAssetFromAiProduct,
-      upsertAiTool,
-      deleteAiTool,
-      setToolsSettings,
-      resolveToolPendingChange,
     }),
     [
       state,
@@ -2691,6 +2661,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       deleteAnnouncement,
       setHomepageSections,
       setHomepageHero,
+      homepagePreviewDraft,
+      setHomepagePreviewDraft,
+      setSiteContent,
       markNotificationRead,
       markAllNotificationsRead,
       resetStore,
@@ -2698,6 +2671,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       updateMediaAsset,
       deleteMediaAsset,
       setMediaSettings,
+      setStoreSettings,
       refreshEligibleWatermarkPreviews,
       watermarkRefreshProgress,
       setImagePdpSettings,
@@ -2709,10 +2683,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       detachMediaFromProduct,
       attachImageAssetToAiProduct,
       detachImageAssetFromAiProduct,
-      upsertAiTool,
-      deleteAiTool,
-      setToolsSettings,
-      resolveToolPendingChange,
     ],
   );
 

@@ -4,10 +4,10 @@ import { AuthGate } from "@/admin/components/layout/AuthGate";
 
 export const metadata: Metadata = {
   title: {
-    default: "RHYTHM Admin",
-    template: "%s · RHYTHM Admin",
+    default: "PRAGVI Admin",
+    template: "%s · PRAGVI Admin",
   },
-  description: "RHYTHM content and store operations CMS",
+  description: "PRAGVI content and store operations CMS",
 };
 
 export default function AdminLayout({

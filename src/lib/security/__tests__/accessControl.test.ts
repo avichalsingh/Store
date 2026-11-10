@@ -3,7 +3,7 @@
  * Run: npx tsx --test src/lib/security/__tests__/*.test.ts
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -30,6 +30,70 @@ describe("paid download fail-closed", () => {
   });
 });
 
+describe("paid prompt/caption text fail-closed", () => {
+  it("library content is auth + entitlement gated with no-store headers", () => {
+    const src = readFileSync(
+      join(root, "src/app/api/library/content/route.ts"),
+      "utf8",
+    );
+    const helper = readFileSync(
+      join(root, "src/lib/commerce/libraryContent.ts"),
+      "utf8",
+    );
+    const libraryPage = readFileSync(
+      join(root, "src/app/(store)/library/[productId]/page.tsx"),
+      "utf8",
+    );
+    assert.match(src, /AUTH_REQUIRED|getUser/);
+    assert.match(src, /createEntitledLibraryContent/);
+    assert.match(src, /private, no-store/);
+    assert.match(helper, /userHasEntitlement/);
+    assert.match(helper, /ENTITLEMENT_REQUIRED/);
+    assert.match(helper, /prompt_data|caption_pack_data/);
+    assert.match(libraryPage, /fetchLibraryContent/);
+    assert.doesNotMatch(libraryPage, /adminProduct\?\.promptData/);
+    assert.doesNotMatch(libraryPage, /adminProduct\?\.captionPackData/);
+  });
+});
+
+describe("admin private vault fail-closed (Stage 6B)", () => {
+  it("private seed stays server-only; CMS state never merges vault bodies", () => {
+    const vault = readFileSync(
+      join(root, "src/admin/lib/privateProductPayloads.ts"),
+      "utf8",
+    );
+    const provider = readFileSync(
+      join(root, "src/admin/store/AdminProvider.tsx"),
+      "utf8",
+    );
+    const route = readFileSync(
+      join(root, "src/app/api/admin/private-payloads/route.ts"),
+      "utf8",
+    );
+    const priv = readFileSync(
+      join(root, "src/admin/data/marketplacePrivatePayloads.ts"),
+      "utf8",
+    );
+    assert.match(vault, /\/api\/admin\/session/);
+    assert.match(vault, /\/api\/admin\/private-payloads/);
+    assert.match(vault, /isAdminPrivateContentPath/);
+    assert.match(vault, /\/admin\/login/);
+    assert.doesNotMatch(vault, /getAdminSession\(\)/);
+    assert.doesNotMatch(
+      vault,
+      /from ["']@\/admin\/data\/marketplacePrivatePayloads["']/,
+    );
+    assert.match(priv, /import ["']server-only["']/);
+    assert.match(route, /isAdminSessionTokenValid/);
+    assert.match(route, /status:\s*401/);
+    assert.match(provider, /stripPrivatePaidProducts/);
+    assert.doesNotMatch(provider, /loadSeedPrivatePayloads/);
+    assert.doesNotMatch(provider, /applyPrivatePayloadsToProducts/);
+    assert.doesNotMatch(provider, /isAdminCmsContext/);
+    assert.doesNotMatch(provider, /marketplacePrivatePayloads/);
+  });
+});
+
 
 describe("middleware admin gates", () => {
   it("gates /admin and /api/admin except login POST", () => {
@@ -37,7 +101,155 @@ describe("middleware admin gates", () => {
     assert.match(src, /isAdminCookieHeaderValidEdge/);
     assert.match(src, /\/admin\/login/);
     assert.match(src, /\/api\/admin/);
-    assert.match(src, /\/api\/tools\//);
+    // KYC release excludes AI Tools — middleware must not depend on /api/tools.
+    assert.doesNotMatch(src, /\/api\/tools\//);
+  });
+
+  it("gates customer account, checkout, and library behind Supabase Auth", () => {
+    const src = readFileSync(join(root, "src/middleware.ts"), "utf8");
+    assert.match(src, /requiresCustomerAuth/);
+    assert.match(src, /\/signin/);
+    assert.match(src, /\/account/);
+    assert.match(src, /\/checkout/);
+    assert.match(src, /\/library\//);
+  });
+});
+
+describe("CSP allows Razorpay Checkout without blanket wildcards", () => {
+  it("includes Razorpay hosts in script-src, frame-src, and connect-src", async () => {
+    const { SECURITY_HEADERS } = await import("../headers");
+    const csp = SECURITY_HEADERS["Content-Security-Policy"];
+    assert.match(csp, /script-src[^;]*https:\/\/\*\.razorpay\.com/);
+    assert.match(csp, /frame-src[^;]*https:\/\/\*\.razorpay\.com/);
+    assert.match(csp, /connect-src[^;]*https:\/\/\*\.razorpay\.com/);
+    // No scheme-wide / universal script allowlist.
+    assert.doesNotMatch(csp, /script-src[^;]* https:(;|$)/);
+    assert.doesNotMatch(csp, /script-src[^;]* \*(;|$)/);
+    // upgrade-insecure-requests breaks Safari on local HTTP (CSS/JS upgraded to
+    // HTTPS and fail to load → unstyled HTML). Production hosts already use TLS.
+    assert.doesNotMatch(csp, /upgrade-insecure-requests/);
+  });
+});
+
+describe("COOP allows Razorpay bank-auth popups on storefront documents", () => {
+  it("uses same-origin-allow-popups on storefront HTML; same-origin on admin/api/auth", async () => {
+    const {
+      COOP_DEFAULT,
+      COOP_STOREFRONT,
+      SECURITY_HEADERS,
+      applySecurityHeaders,
+      isStorefrontDocumentPath,
+      resolveCrossOriginOpenerPolicy,
+    } = await import("../headers");
+
+    assert.equal(COOP_DEFAULT, "same-origin");
+    assert.equal(COOP_STOREFRONT, "same-origin-allow-popups");
+    assert.equal(
+      SECURITY_HEADERS["Cross-Origin-Opener-Policy"],
+      "same-origin",
+    );
+
+    const storefrontPaths = [
+      "/",
+      "/signin",
+      "/checkout",
+      "/checkout/",
+      "/account",
+      "/library/foo",
+      "/videos",
+      "/videos/some-slug",
+      "/explore",
+      "/images/some-slug",
+      "/characters/x",
+      "/collections/y",
+      "/bundles/z",
+      "/cart",
+    ];
+    for (const pathname of storefrontPaths) {
+      assert.equal(isStorefrontDocumentPath(pathname), true, pathname);
+      assert.equal(
+        resolveCrossOriginOpenerPolicy(pathname),
+        COOP_STOREFRONT,
+        pathname,
+      );
+      const headers = new Headers();
+      applySecurityHeaders(headers, { pathname });
+      assert.equal(
+        headers.get("Cross-Origin-Opener-Policy"),
+        "same-origin-allow-popups",
+        pathname,
+      );
+      assert.match(
+        headers.get("Content-Security-Policy") || "",
+        /https:\/\/\*\.razorpay\.com/,
+      );
+    }
+
+    const retainDefaultPaths = [
+      "/admin",
+      "/admin/login",
+      "/admin/products",
+      "/api/checkout/create-order",
+      "/api/catalog",
+      "/api/admin/session",
+      "/api/webhooks/razorpay",
+      "/auth/callback",
+    ];
+    for (const pathname of retainDefaultPaths) {
+      assert.equal(isStorefrontDocumentPath(pathname), false, pathname);
+      assert.equal(
+        resolveCrossOriginOpenerPolicy(pathname),
+        COOP_DEFAULT,
+        pathname,
+      );
+      const headers = new Headers();
+      applySecurityHeaders(headers, { pathname });
+      assert.equal(
+        headers.get("Cross-Origin-Opener-Policy"),
+        "same-origin",
+        pathname,
+      );
+    }
+  });
+
+  it("middleware applies security headers with pathname for COOP scoping", () => {
+    const src = readFileSync(join(root, "src/middleware.ts"), "utf8");
+    assert.match(src, /applySecurityHeaders\([^,]+,\s*\{\s*pathname\s*\}/);
+    assert.match(src, /withSecurityHeaders\([^,]+,\s*pathname\)/);
+    assert.doesNotMatch(src, /Cross-Origin-Embedder-Policy/);
+  });
+
+  it("middleware normalizes trailing slashes with an explicit Content-Type", () => {
+    const src = readFileSync(join(root, "src/middleware.ts"), "utf8");
+    assert.match(src, /pathname\.endsWith\("\/"\)/);
+    assert.match(
+      src,
+      /redirect\.headers\.set\(\s*"Content-Type",\s*"text\/html; charset=utf-8"\s*\)/,
+    );
+  });
+});
+
+describe("auth callback", () => {
+  it("exchanges PKCE code and verifies email OTP token_hash safely", () => {
+    const src = readFileSync(
+      join(root, "src/app/auth/callback/route.ts"),
+      "utf8",
+    );
+    assert.match(src, /exchangeCodeForSession/);
+    assert.match(src, /verifyOtp/);
+    assert.match(src, /token_hash/);
+    assert.match(src, /safeNextPath/);
+    assert.match(src, /\/signin/);
+    assert.doesNotMatch(src, /SERVICE_ROLE|createServiceClient/);
+  });
+
+  it("checkout returns customers to sign-in with next=/checkout", () => {
+    const src = readFileSync(
+      join(root, "src/app/(store)/checkout/page.tsx"),
+      "utf8",
+    );
+    assert.match(src, /\/signin\?next=/);
+    assert.match(src, /\/checkout/);
   });
 });
 
@@ -155,5 +367,61 @@ describe("secrets stay server-only in client entrypoints", () => {
     assert.doesNotMatch(src, /SERVICE_ROLE/);
     assert.doesNotMatch(src, /ADMIN_API_SECRET/);
     assert.doesNotMatch(src, /WORKER_SHARED_SECRET/);
+  });
+});
+
+describe("AI tools exclusion + homepage publish auth boundaries", () => {
+  it("excludes AI Tools admin/public API routes from the KYC package", () => {
+    for (const rel of [
+      "src/app/api/admin/catalog/tools/publish/route.ts",
+      "src/app/api/admin/catalog/tools/settings/publish/route.ts",
+      "src/app/api/tools/route.ts",
+      "src/app/api/tools/import/route.ts",
+      "src/admin/data/toolsSeed.ts",
+      "src/catalog/tools/useToolsCatalog.ts",
+      "src/components/home/AiToolDealsSection.tsx",
+      "supabase/migrations/20261107010000_launch_ai_tools.sql",
+    ]) {
+      assert.equal(
+        existsSync(join(root, rel)),
+        false,
+        `expected absent: ${rel}`,
+      );
+    }
+  });
+
+  it("homepage publish requires admin session and uses HOMEPAGE_REMOTE_PUBLISH only", () => {
+    const src = readFileSync(
+      join(root, "src/app/api/admin/homepage/publish/route.ts"),
+      "utf8",
+    );
+    assert.match(src, /ADMIN_SESSION_COOKIE/);
+    assert.match(src, /isAdminSessionTokenValid/);
+    assert.match(src, /createServiceClient/);
+    assert.match(src, /decideHomepagePublish/);
+    assert.match(src, /HOMEPAGE_REMOTE_PUBLISH|homepagePublishUserMessage/);
+    assert.doesNotMatch(src, /isCatalogRemotePublishEnabled/);
+    assert.doesNotMatch(src, /from "@\/catalog\/catalogRemotePublish"/);
+    const sessionIdx = src.indexOf("isAdminSessionTokenValid");
+    const serviceIdx = src.indexOf("createServiceClient()");
+    assert.ok(sessionIdx >= 0 && serviceIdx > sessionIdx);
+  });
+
+  it("public homepage API uses anon client only and never imports service role", () => {
+    const src = readFileSync(join(root, "src/app/api/homepage/route.ts"), "utf8");
+    assert.match(src, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+    assert.match(src, /catalog_homepage_config/);
+    assert.doesNotMatch(src, /SERVICE_ROLE|createServiceClient|ADMIN_API_SECRET/);
+  });
+
+  it("admin session cookie helper stays httpOnly and never embeds the raw secret", () => {
+    const src = readFileSync(
+      join(root, "src/admin/lib/adminSessionCookie.ts"),
+      "utf8",
+    );
+    assert.match(src, /httpOnly:\s*true/);
+    assert.match(src, /createHmac/);
+    assert.match(src, /timingSafeEqual/);
+    assert.doesNotMatch(src, /createServiceClient/);
   });
 });

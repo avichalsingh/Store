@@ -24,14 +24,25 @@ export type OrderFulfillmentStatus =
   | "completed"
   | "processing"
   | "cancelled";
+/**
+ * Canonical homepage section IDs — aligned with `src/app/(store)/page.tsx`
+ * / `HomepageComposer` composition (Stage 2).
+ *
+ * Legacy CMS ids (`featured`, `creator-insight`, `promo`, `footer`) are mapped
+ * during normalize; do not reintroduce them as first-class ids.
+ */
 export type HomepageSectionId =
   | "hero"
-  | "featured"
   | "trending"
+  | "trending-strip"
+  | "featured-videos"
+  | "images"
   | "collections"
-  | "creator-insight"
-  | "promo"
-  | "footer";
+  | "bundles"
+  | "ai-tools"
+  | "prompts"
+  | "why-pragvi"
+  | "final-cta";
 
 export type MarketPrice = {
   regularPrice: number;
@@ -249,6 +260,37 @@ export type GlobalMediaSettings = {
   defaultPreviewQuality: PreviewQuality;
   previewResolution: string; // "540x960"
 };
+
+/** Admin General tab — persisted in CMS localStorage (not a remote DB). */
+export type StoreGeneralSettings = {
+  storeName: string;
+  supportEmail: string;
+  defaultMarket: "INR" | "USD";
+};
+
+export const DEFAULT_STORE_GENERAL_SETTINGS: StoreGeneralSettings = {
+  storeName: "PRAGVI",
+  supportEmail: "hello@rhythm.studio",
+  defaultMarket: "INR",
+};
+
+export function normalizeStoreGeneralSettings(
+  settings?: Partial<StoreGeneralSettings> | null,
+): StoreGeneralSettings {
+  const storeName =
+    typeof settings?.storeName === "string" && settings.storeName.trim()
+      ? settings.storeName.trim()
+      : DEFAULT_STORE_GENERAL_SETTINGS.storeName;
+  const supportEmail =
+    typeof settings?.supportEmail === "string" && settings.supportEmail.trim()
+      ? settings.supportEmail.trim()
+      : DEFAULT_STORE_GENERAL_SETTINGS.supportEmail;
+  const defaultMarket =
+    settings?.defaultMarket === "USD" || settings?.defaultMarket === "INR"
+      ? settings.defaultMarket
+      : DEFAULT_STORE_GENERAL_SETTINGS.defaultMarket;
+  return { storeName, supportEmail, defaultMarket };
+}
 
 export type AdminProductCampaign = {
   enabled: boolean;
@@ -468,20 +510,111 @@ export type AdminCustomer = {
   createdAt: string;
 };
 
+/** Editable copy for a homepage section. Omit fields that do not apply. */
+export type HomepageSectionCopy = {
+  eyebrow?: string;
+  title?: string;
+  description?: string;
+  ctaLabel?: string;
+  ctaHref?: string;
+  /** Optional second CTA (e.g. Final CTA dual buttons). */
+  secondaryCtaLabel?: string;
+  secondaryCtaHref?: string;
+};
+
+/**
+ * Trending ticker entry (Stage 3). Independent of carousel/featured product
+ * pickers. Invalid destinations are skipped at render time.
+ */
+export type HomepageTickerEntry = {
+  id: string;
+  label: string;
+  metric: string;
+  /** Optional explicit href (internal path or absolute URL). */
+  href?: string;
+  /** Optional product id — resolves to `/videos/{slug}` when href is empty. */
+  productId?: string;
+  order: number;
+  enabled?: boolean;
+};
+
+/**
+ * Curated content slots. Empty arrays mean “use storefront fallbacks”.
+ * Invalid / missing ids are skipped at render time.
+ *
+ * Featured merchandising uses each section’s own `productIds` /
+ * `collectionIds` and is independent of the `trending` section’s picks.
+ */
+export type HomepageSectionContent = {
+  productIds?: string[];
+  collectionIds?: string[];
+  /** Soft cap for curated or fallback lists. */
+  maxItems?: number;
+  /** Trending ticker rows (`trending-strip` only). */
+  tickerEntries?: HomepageTickerEntry[];
+};
+
 export type HomepageSection = {
   id: HomepageSectionId;
   label: string;
   enabled: boolean;
   order: number;
+  copy?: HomepageSectionCopy;
+  content?: HomepageSectionContent;
+};
+
+/**
+ * Optional per-tile collage curation for the public Hero.
+ * Empty strings / empty arrays mean “use automatic catalog fallbacks”.
+ * Persisted in local CMS draft only today (no Supabase migration required).
+ */
+export type HomepageHeroCollageConfig = {
+  /** Category tile: Viral Dance Videos (VIDEO product thumbnail). */
+  viralDanceProductId: string;
+  /** Category tile: AI Images (AI_IMAGE product thumbnail). */
+  aiImageProductId: string;
+  /** Category tile: Motion Control Videos (VIDEO product thumbnail). */
+  motionControlProductId: string;
+  /** Category tile: AI Tools (tool cover/logo). */
+  toolId: string;
+  /**
+   * Ordered preview-video slots (desktop cols 2–4 / mobile playable rail).
+   * Max 3 used. Missing slots fall back to automatic preview picks.
+   */
+  previewVideoIds: string[];
 };
 
 export type HomepageHeroConfig = {
+  /**
+   * Reserved for a future hero layout. Not rendered by the current collage
+   * hero (headline + media + CTA only). Kept for persistence / DB compat.
+   */
   eyebrow: string;
   headline: string;
+  /**
+   * Reserved for a future hero layout. Not rendered by the current collage
+   * hero. Kept for persistence / DB compat.
+   */
   supportingText: string;
+  /**
+   * Featured Video still preference. Used for the Featured Video link tile
+   * and as lower-left fallback when no AI Image tile src is available.
+   * Not a substitute for full collage curation — see `collage`.
+   */
   featuredProductId: string;
   ctaText: string;
   ctaHref: string;
+  collage: HomepageHeroCollageConfig;
+};
+
+/**
+ * Durable document shape for a future `site_content` / `homepage_config` table.
+ * AdminProvider still persists flat `homepageSections` + `homepageHero` today.
+ */
+export type HomepageConfigDocument = {
+  version: 1;
+  sections: HomepageSection[];
+  hero: HomepageHeroConfig;
 };
 
 export type Announcement = {

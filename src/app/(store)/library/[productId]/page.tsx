@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Check, Copy, Download, Lock } from "lucide-react";
@@ -9,6 +9,7 @@ import { resolvePublicPreviewUrl } from "@/admin/lib/resolveAiImageMedia";
 import { usePurchases } from "@/context/PurchaseContext";
 import { useCatalog } from "@/catalog/useCatalog";
 import type { AdminProduct, MediaAsset } from "@/admin/types";
+import type { CaptionPackData, PromptData } from "@/catalog/productPayloads";
 import {
   productBrowseHref,
   productPdpHref,
@@ -17,7 +18,8 @@ import {
 } from "@/catalog/productTypes";
 import { CoverImage } from "@/components/ui/CoverImage";
 import { userOwnsProductId } from "@/catalog/contentPackMigration";
-import { mockPurchases } from "@/data/purchases";
+import { createClient } from "@/lib/supabase/client";
+import { fetchLibraryContent } from "@/lib/commerce/clientLibraryContent";
 
 function CopyButton({
   text,
@@ -54,15 +56,11 @@ export default function LibraryProductPage() {
   const { products, mediaAssets, hydrated: adminHydrated } = useAdmin();
   const catalog = useCatalog();
 
-  const owned =
-    userOwnsProductId(
-      productId,
-      [
-        ...purchases.map((p) => p.productId),
-        ...mockPurchases.map((p) => p.productId),
-      ],
-    ) ||
-    mockPurchases.some((p) => p.productId === productId);
+  // Ownership for UI gating — content/download APIs still enforce server entitlements.
+  const owned = userOwnsProductId(
+    productId,
+    purchases.map((p) => p.productId),
+  );
 
   const adminProduct = useMemo(
     () => products.find((p) => p.id === productId),
@@ -125,12 +123,8 @@ export default function LibraryProductPage() {
       </p>
 
       <div className="mt-10 space-y-8">
-        {type === "PROMPT" && adminProduct?.promptData && (
-          <PromptAccess data={adminProduct.promptData} />
-        )}
-        {type === "CAPTION_PACK" && adminProduct?.captionPackData && (
-          <CaptionPackAccess data={adminProduct.captionPackData} />
-        )}
+        {type === "PROMPT" && <PromptAccess productId={productId} />}
+        {type === "CAPTION_PACK" && <CaptionPackAccess productId={productId} />}
         {type === "AI_IMAGE" && adminProduct && (
           <AiImageAccess
             product={adminProduct}
@@ -172,23 +166,175 @@ export default function LibraryProductPage() {
             ))}
           </ul>
         )}
-        {!adminProduct && type !== "VIDEO" && type !== "BUNDLE" && (
-          <p className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted">
-            Content payload is not available in CMS for this product yet.
-          </p>
-        )}
+        {type !== "PROMPT" &&
+          type !== "CAPTION_PACK" &&
+          type !== "VIDEO" &&
+          type !== "BUNDLE" &&
+          type !== "AI_IMAGE" && (
+            <p className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted">
+              This product type does not include library text content.
+            </p>
+          )}
       </div>
     </div>
   );
 }
 
-function PromptAccess({
-  data,
-}: {
-  data: NonNullable<
-    import("@/admin/types").AdminProduct["promptData"]
-  >;
-}) {
+type TextContentStatus =
+  | { phase: "loading" }
+  | { phase: "ready"; promptData?: PromptData; captionPackData?: CaptionPackData }
+  | { phase: "unauthorized" }
+  | { phase: "forbidden" }
+  | { phase: "unavailable"; message: string }
+  | { phase: "error"; message: string };
+
+function useEntitledTextContent(
+  productId: string,
+  expectedType: "PROMPT" | "CAPTION_PACK",
+) {
+  const [status, setStatus] = useState<TextContentStatus>({ phase: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus({ phase: "loading" });
+
+    const load = async () => {
+      const result = await fetchLibraryContent(productId);
+      if (cancelled) return;
+
+      if (!result.ok) {
+        if (result.status === 401 || result.code === "AUTH_REQUIRED") {
+          setStatus({ phase: "unauthorized" });
+          return;
+        }
+        if (
+          result.status === 403 ||
+          result.code === "ENTITLEMENT_REQUIRED"
+        ) {
+          setStatus({ phase: "forbidden" });
+          return;
+        }
+        if (
+          result.status === 404 ||
+          result.code === "CONTENT_UNAVAILABLE" ||
+          result.code === "PRODUCT_NOT_FOUND" ||
+          result.code === "UNSUPPORTED_TYPE" ||
+          result.code === "BAD_PRODUCT_ID"
+        ) {
+          setStatus({
+            phase: "unavailable",
+            message: result.error,
+          });
+          return;
+        }
+        setStatus({ phase: "error", message: result.error });
+        return;
+      }
+
+      if (result.productType !== expectedType) {
+        setStatus({
+          phase: "unavailable",
+          message: "Content type does not match this product",
+        });
+        return;
+      }
+
+      setStatus({
+        phase: "ready",
+        promptData: result.promptData,
+        captionPackData: result.captionPackData,
+      });
+    };
+
+    void load();
+
+    // Clear private content on logout / account switch — never keep prior payload.
+    let subscription: { unsubscribe: () => void } | null = null;
+    try {
+      const supabase = createClient();
+      const { data } = supabase.auth.onAuthStateChange((event) => {
+        if (cancelled) return;
+        if (event === "SIGNED_OUT") {
+          setStatus({ phase: "unauthorized" });
+          return;
+        }
+        if (
+          event === "SIGNED_IN" ||
+          event === "TOKEN_REFRESHED" ||
+          event === "USER_UPDATED"
+        ) {
+          setStatus({ phase: "loading" });
+          void load();
+        }
+      });
+      subscription = data.subscription;
+    } catch {
+      /* ignore client init failures — fetch still enforces auth */
+    }
+
+    return () => {
+      cancelled = true;
+      subscription?.unsubscribe();
+    };
+  }, [productId, expectedType]);
+
+  return status;
+}
+
+function TextContentGate({ status }: { status: TextContentStatus }) {
+  if (status.phase === "loading") {
+    return (
+      <div className="h-40 animate-pulse rounded-2xl bg-surface-2" aria-busy />
+    );
+  }
+  if (status.phase === "unauthorized") {
+    return (
+      <div className="rounded-2xl border border-border bg-surface p-6 text-sm text-muted">
+        <Lock className="mb-2 text-muted" size={20} />
+        Sign in to view your purchased content.
+        <div className="mt-4">
+          <Link
+            href="/signin?next=/library"
+            className="inline-flex rounded-full bg-accent px-4 py-2 text-xs font-semibold text-white"
+          >
+            Sign in
+          </Link>
+        </div>
+      </div>
+    );
+  }
+  if (status.phase === "forbidden") {
+    return (
+      <div className="rounded-2xl border border-border bg-surface p-6 text-sm text-muted">
+        <Lock className="mb-2 text-muted" size={20} />
+        This content stays locked until purchase entitlement is verified.
+      </div>
+    );
+  }
+  if (status.phase === "unavailable") {
+    return (
+      <p className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted">
+        {status.message}
+      </p>
+    );
+  }
+  if (status.phase === "error") {
+    return (
+      <p className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted">
+        {status.message}
+      </p>
+    );
+  }
+  return null;
+}
+
+function PromptAccess({ productId }: { productId: string }) {
+  const status = useEntitledTextContent(productId, "PROMPT");
+  const gate = <TextContentGate status={status} />;
+  if (status.phase !== "ready" || !status.promptData) {
+    return gate;
+  }
+  const data = status.promptData;
   return (
     <div className="space-y-4">
       <section className="rounded-3xl border border-border bg-surface p-6">
@@ -226,11 +372,13 @@ function PromptAccess({
   );
 }
 
-function CaptionPackAccess({
-  data,
-}: {
-  data: { items: { id: string; caption: string; hashtags: string[]; label?: string }[] };
-}) {
+function CaptionPackAccess({ productId }: { productId: string }) {
+  const status = useEntitledTextContent(productId, "CAPTION_PACK");
+  const gate = <TextContentGate status={status} />;
+  if (status.phase !== "ready" || !status.captionPackData) {
+    return gate;
+  }
+  const data = status.captionPackData;
   return (
     <ul className="space-y-4">
       {data.items.map((item, index) => {
@@ -279,34 +427,17 @@ function SecureMasterDownload({
         disabled={busy}
         className="mt-4 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
         onClick={async () => {
+          if (busy) return;
           setMessage(null);
           setBusy(true);
           try {
-            const res = await fetch("/api/library/download", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ productId }),
-            });
-            const data = (await res.json().catch(() => null)) as {
-              ok?: boolean;
-              error?: string;
-              downloadUrl?: string;
-              fileName?: string;
-            } | null;
-            if (!res.ok || !data?.ok || !data.downloadUrl) {
-              setMessage(
-                data?.error ||
-                  "Download is unavailable without a verified purchase.",
-              );
-              return;
+            const { requestAndStartMasterDownload } = await import(
+              "@/lib/commerce/clientMasterDownload"
+            );
+            const result = await requestAndStartMasterDownload(productId);
+            if (!result.ok) {
+              setMessage(result.error);
             }
-            const a = document.createElement("a");
-            a.href = data.downloadUrl;
-            a.download = data.fileName || "download";
-            a.rel = "noopener";
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
           } catch {
             setMessage("Download request failed.");
           } finally {

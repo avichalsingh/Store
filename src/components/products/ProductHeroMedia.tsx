@@ -3,12 +3,14 @@
 import { motion } from "framer-motion";
 import { VideoPreview } from "@/components/products/VideoPreview";
 import { PerformanceCardOverlay } from "@/components/products/PerformanceCardOverlay";
+import { publicPerformance } from "@/catalog/publicPerformance";
 import type { VideoProduct } from "@/types";
 import { usePrefersReducedMotion } from "@/hooks/useInViewOnce";
 
 export function ProductHeroMedia({ video }: { video: VideoProduct }) {
   const reduced = usePrefersReducedMotion();
   const hasPreview = Boolean(video.previewVideo);
+  const performance = publicPerformance(video.performance);
 
   return (
     <motion.div
@@ -26,8 +28,8 @@ export function ProductHeroMedia({ video }: { video: VideoProduct }) {
         idlePlayPulse={hasPreview}
         className="max-h-full"
       />
-      {video.performance ? (
-        <PerformanceCardOverlay performance={video.performance} />
+      {performance ? (
+        <PerformanceCardOverlay performance={performance} />
       ) : null}
     </motion.div>
   );

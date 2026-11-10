@@ -7,6 +7,7 @@ import { useRegion } from "@/context/RegionContext";
 import { useCart } from "@/context/CartContext";
 import { getVideoQuote, formatPrice } from "@/lib/pricing";
 import { usePrefersReducedMotion } from "@/hooks/useInViewOnce";
+import { publicPerformance } from "@/catalog/publicPerformance";
 import { cn } from "@/lib/utils";
 
 export function StickyPurchaseBar({
@@ -26,15 +27,16 @@ export function StickyPurchaseBar({
   const reduced = usePrefersReducedMotion();
   const savings = Math.max(0, quote.regular - quote.current);
 
-  const likes = video.performance?.secondaryMetrics.find((m) =>
+  const performance = publicPerformance(video.performance);
+  const likes = performance?.secondaryMetrics.find((m) =>
     /like/i.test(m.label),
   );
-  const shares = video.performance?.secondaryMetrics.find((m) =>
+  const shares = performance?.secondaryMetrics.find((m) =>
     /share/i.test(m.label),
   );
   const primary =
-    typeof video.performance?.primaryMetric === "string"
-      ? video.performance.primaryMetric.trim()
+    typeof performance?.primaryMetric === "string"
+      ? performance.primaryMetric.trim()
       : "";
 
   useEffect(() => {
@@ -77,22 +79,28 @@ export function StickyPurchaseBar({
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="inline-flex items-center gap-1.5 truncate text-xs font-bold uppercase tracking-[0.14em] text-accent">
-            <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden>
-              {!reduced && !calm ? (
-                <span className="absolute inline-flex h-full w-full animate-live-ring rounded-full bg-emerald-400/45" />
-              ) : null}
-              <span
-                className={cn(
-                  "relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400",
-                  !calm && "animate-live-dot",
-                )}
-              />
-            </span>
-            🔥 TRENDING RIGHT NOW
+            {performance ? (
+              <>
+                <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden>
+                  {!reduced && !calm ? (
+                    <span className="absolute inline-flex h-full w-full animate-live-ring rounded-full bg-emerald-400/45" />
+                  ) : null}
+                  <span
+                    className={cn(
+                      "relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400",
+                      !calm && "animate-live-dot",
+                    )}
+                  />
+                </span>
+                {performance.badge?.trim() || "FEATURED"}
+              </>
+            ) : (
+              "READY TO UNLOCK"
+            )}
           </p>
           <p className="hidden truncate text-sm text-text-dim sm:block">
             {primary
-              ? `${primary} plays · ${shares?.value ?? likes?.value ?? "—"} shares`
+              ? `${primary} ${performance?.primaryLabel?.toLowerCase() || "plays"} · ${shares?.value ?? likes?.value ?? "—"} shares`
               : video.title}
           </p>
         </div>

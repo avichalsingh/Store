@@ -7,7 +7,7 @@ export default function NotFound() {
         404
       </p>
       <h1 className="mt-3 font-display text-4xl font-bold tracking-tight">
-        This move isn&apos;t on the floor
+        Page not found
       </h1>
       <p className="mt-3 text-muted">
         The page you&apos;re looking for doesn&apos;t exist or has been moved.

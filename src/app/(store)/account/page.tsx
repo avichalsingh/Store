@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CoverImage } from "@/components/ui/CoverImage";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Download, Heart, Settings, Library } from "lucide-react";
-import { mockPurchases } from "@/data/purchases";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/context/ThemeContext";
 import { useRegion } from "@/context/RegionContext";
@@ -12,6 +12,8 @@ import { usePurchases } from "@/context/PurchaseContext";
 import { regionLabel } from "@/lib/pricing";
 import { PRODUCT_TYPE_CONFIG, type ProductType } from "@/catalog/productTypes";
 import { isProductType } from "@/catalog/productTypes";
+import { PRODUCT_CARD_GRID_GAP } from "@/components/products/productCardGrid";
+import { createClient } from "@/lib/supabase/client";
 
 const tabs = [
   { id: "library", label: "My Library", icon: Library },
@@ -51,15 +53,87 @@ function libraryCta(productType: string): string {
 }
 
 export default function AccountPage() {
+  const router = useRouter();
   const [tab, setTab] = useState<TabId>("library");
   const [filter, setFilter] = useState<FilterId>("all");
-  const { purchases, hydrated } = usePurchases();
+  const { purchases, hydrated, refreshPurchases } = usePurchases();
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
+  const [downloadBusyId, setDownloadBusyId] = useState<string | null>(null);
+  const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
+
+  async function onLibraryDownload(productId: string) {
+    if (downloadBusyId) return;
+    setDownloadMessage(null);
+    setDownloadBusyId(productId);
+    try {
+      const { requestAndStartMasterDownload } = await import(
+        "@/lib/commerce/clientMasterDownload"
+      );
+      const result = await requestAndStartMasterDownload(productId);
+      if (!result.ok) {
+        setDownloadMessage(result.error);
+      }
+    } catch {
+      setDownloadMessage("Download request failed.");
+    } finally {
+      setDownloadBusyId(null);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase.auth.getUser();
+        if (!cancelled) {
+          setUserEmail(data.user?.email ?? null);
+          setAuthReady(true);
+        }
+        // Always refresh: signed-in → replace with that user's entitlements;
+        // signed-out → API 401 clears the list (no cross-account leakage).
+        await refreshPurchases();
+      } catch {
+        if (!cancelled) {
+          setUserEmail(null);
+          setAuthReady(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshPurchases]);
 
   const libraryItems = useMemo(() => {
-    const base = purchases.length > 0 ? purchases : mockPurchases;
-    if (filter === "all") return base;
-    return base.filter((item) => resolveProductType(item) === filter);
+    if (filter === "all") return purchases;
+    return purchases.filter((item) => resolveProductType(item) === filter);
   }, [purchases, filter]);
+
+  async function onSignOut() {
+    setSigningOut(true);
+    setSignOutError("");
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        setSignOutError("Could not sign out. Try again.");
+        return;
+      }
+      setUserEmail(null);
+      // Auth listener also clears; refresh ensures purchases are empty before leave.
+      await refreshPurchases();
+      router.replace("/signin");
+      router.refresh();
+    } catch {
+      setSignOutError("Could not sign out. Try again.");
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-4 pb-20 pt-28 sm:px-6 lg:px-8">
@@ -72,12 +146,31 @@ export default function AccountPage() {
             Your space
           </h1>
           <p className="mt-3 max-w-lg text-muted">
-            Access purchased dances, favorites, and settings. Auth comes later —
-            this is the structure.
+            Access purchases, My Library, favorites, and account settings.
           </p>
         </div>
-        <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
-          Signed in as <span className="text-text">creator@demo.com</span>
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
+            {!authReady ? (
+              "Checking session…"
+            ) : (
+              <>
+                Signed in as{" "}
+                <span className="text-text">{userEmail ?? "account"}</span>
+              </>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void onSignOut()}
+            disabled={signingOut || !authReady}
+            className="rounded-full border border-border px-4 py-2 text-xs font-semibold text-muted transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
+          >
+            {signingOut ? "Signing out…" : "Sign out"}
+          </button>
+          {signOutError ? (
+            <p className="text-xs text-red-400">{signOutError}</p>
+          ) : null}
         </div>
       </div>
 
@@ -132,7 +225,9 @@ export default function AccountPage() {
               ) : libraryItems.length === 0 ? (
                 <div className="mt-8 rounded-3xl border border-dashed border-border p-10 text-center">
                   <p className="font-display text-xl font-bold">
-                    Nothing in this filter
+                    {purchases.length === 0
+                      ? "No purchases yet"
+                      : "Nothing in this filter"}
                   </p>
                   <Link
                     href="/explore"
@@ -142,46 +237,83 @@ export default function AccountPage() {
                   </Link>
                 </div>
               ) : (
-                <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                  {libraryItems.map((item) => {
-                    const productType = resolveProductType(item);
-                    const typeLabel = isProductType(productType)
-                      ? PRODUCT_TYPE_CONFIG[productType as ProductType].singular
-                      : productType === "COLLECTION"
-                        ? "Collection"
-                        : productType;
-                    const href =
-                      item.type === "collection"
-                        ? `/collections/${item.productId}`
-                        : `/library/${item.productId}`;
-                    return (
-                      <article key={item.id} className="group">
-                        <div className="relative aspect-[9/16] overflow-hidden rounded-2xl ring-1 ring-border">
-                          <CoverImage
-                            src={item.thumbnail}
-                            alt=""
-                            fill
-                            sizes="200px"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
-                          <Link
-                            href={href}
-                            className="absolute bottom-3 left-3 right-3 rounded-full bg-white/15 py-2 text-center text-xs font-semibold text-white backdrop-blur-md transition hover:bg-accent"
-                          >
-                            {libraryCta(productType)}
-                          </Link>
-                        </div>
-                        <p className="mt-3 text-[11px] uppercase tracking-[0.14em] text-muted">
-                          {typeLabel}
-                          {item.characterName ? ` · ${item.characterName}` : ""}
-                        </p>
-                        <h3 className="text-sm font-semibold text-text">
-                          {item.title}
-                        </h3>
-                      </article>
-                    );
-                  })}
-                </div>
+                <>
+                  {downloadMessage ? (
+                    <p className="mt-4 text-sm text-muted">{downloadMessage}</p>
+                  ) : null}
+                  <div
+                    className={cn(
+                      "mt-8 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4",
+                      PRODUCT_CARD_GRID_GAP,
+                    )}
+                  >
+                    {libraryItems.map((item) => {
+                      const productType = resolveProductType(item);
+                      const typeLabel = isProductType(productType)
+                        ? PRODUCT_TYPE_CONFIG[productType as ProductType]
+                            .singular
+                        : productType === "COLLECTION"
+                          ? "Collection"
+                          : productType;
+                      const href =
+                        item.type === "collection"
+                          ? `/collections/${item.productId}`
+                          : `/library/${item.productId}`;
+                      const isMasterDownload =
+                        productType === "VIDEO" || productType === "AI_IMAGE";
+                      const busy = downloadBusyId === item.productId;
+                      return (
+                        <article key={item.id} className="group">
+                          <div className="relative aspect-[9/16] overflow-hidden rounded-2xl ring-1 ring-border">
+                            <CoverImage
+                              src={item.thumbnail}
+                              alt=""
+                              fill
+                              sizes="200px"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/75 to-transparent" />
+                            {isMasterDownload ? (
+                              <button
+                                type="button"
+                                disabled={Boolean(downloadBusyId)}
+                                onClick={() =>
+                                  void onLibraryDownload(item.productId)
+                                }
+                                className="absolute bottom-3 left-3 right-3 rounded-full bg-white/15 py-2 text-center text-xs font-semibold text-white backdrop-blur-md transition hover:bg-accent disabled:opacity-50"
+                              >
+                                {busy ? "Preparing…" : libraryCta(productType)}
+                              </button>
+                            ) : (
+                              <Link
+                                href={href}
+                                className="absolute bottom-3 left-3 right-3 rounded-full bg-white/15 py-2 text-center text-xs font-semibold text-white backdrop-blur-md transition hover:bg-accent"
+                              >
+                                {libraryCta(productType)}
+                              </Link>
+                            )}
+                          </div>
+                          <p className="mt-3 text-[11px] uppercase tracking-[0.14em] text-muted">
+                            {typeLabel}
+                            {item.characterName
+                              ? ` · ${item.characterName}`
+                              : ""}
+                          </p>
+                          <h3 className="text-sm font-semibold text-text">
+                            {item.title}
+                          </h3>
+                          {isMasterDownload ? (
+                            <Link
+                              href={href}
+                              className="mt-1 inline-block text-[11px] font-medium text-accent"
+                            >
+                              View details
+                            </Link>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -189,8 +321,21 @@ export default function AccountPage() {
           {tab === "purchases" && (
             <div>
               <h2 className="font-display text-2xl font-bold">Purchases</h2>
+              {!hydrated ? (
+                <div className="mt-6 h-40 animate-pulse rounded-2xl bg-surface-2" />
+              ) : purchases.length === 0 ? (
+                <div className="mt-6 rounded-3xl border border-dashed border-border p-10 text-center">
+                  <p className="font-display text-xl font-bold">No purchases yet</p>
+                  <Link
+                    href="/explore"
+                    className="mt-6 inline-flex rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white"
+                  >
+                    Browse shop
+                  </Link>
+                </div>
+              ) : (
               <ul className="mt-6 space-y-3">
-                {(purchases.length > 0 ? purchases : mockPurchases).map(
+                {purchases.map(
                   (item) => (
                     <li
                       key={item.id}
@@ -224,6 +369,7 @@ export default function AccountPage() {
                   ),
                 )}
               </ul>
+              )}
             </div>
           )}
 
@@ -234,7 +380,7 @@ export default function AccountPage() {
                 No favorites yet
               </h2>
               <p className="mt-2 text-sm text-muted">
-                Heart characters and dances while browsing to save them here.
+                Heart characters and products while browsing to save them here.
               </p>
               <Link
                 href="/explore"
@@ -251,15 +397,33 @@ export default function AccountPage() {
                 Account Settings
               </h2>
               <div className="space-y-4 rounded-3xl border border-border bg-surface p-6">
-                <Field label="Display name" value="Demo Creator" />
-                <Field label="Email" value="creator@demo.com" />
-                <Field label="Preferred license" value="Standard" />
+                <Field
+                  label="Email"
+                  value={
+                    !authReady
+                      ? "Checking…"
+                      : userEmail || "Signed-in account"
+                  }
+                />
                 <AppearanceField />
                 <RegionField />
-                <p className="text-xs text-muted">
-                  Real account management will connect here once authentication
-                  is enabled.
-                </p>
+                <div className="border-t border-border pt-4">
+                  <p className="text-xs text-muted">
+                    Sign out clears your session on this device. Purchases stay
+                    tied to your account and reappear after you sign back in.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void onSignOut()}
+                    disabled={signingOut || !authReady}
+                    className="mt-3 rounded-full border border-border px-4 py-2 text-xs font-semibold text-muted transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
+                  >
+                    {signingOut ? "Signing out…" : "Sign out"}
+                  </button>
+                  {signOutError ? (
+                    <p className="mt-2 text-xs text-red-400">{signOutError}</p>
+                  ) : null}
+                </div>
               </div>
             </div>
           )}

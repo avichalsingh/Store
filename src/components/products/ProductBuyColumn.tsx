@@ -14,6 +14,10 @@ import { FormatActivity } from "@/components/products/pdp/FormatActivity";
 import { WhatYouGet } from "@/components/products/pdp/WhatYouGet";
 import { VideoAddOns } from "@/components/products/pdp/VideoAddOns";
 import { VideoOrderSummary } from "@/components/products/pdp/VideoOrderSummary";
+import {
+  publicCreatorActivity,
+  publicPerformance,
+} from "@/catalog/publicPerformance";
 
 function addOnPrice(
   parent: VideoProduct,
@@ -91,28 +95,37 @@ export function ProductBuyColumn({ video }: { video: VideoProduct }) {
     router.push("/checkout");
   };
 
-  const rating = video.creatorRating ?? 4.9;
+  const performance = publicPerformance(video.performance);
+  const activity = publicCreatorActivity(video.activity);
+  const rating =
+    typeof video.creatorRating === "number" &&
+    Number.isFinite(video.creatorRating) &&
+    video.creatorRating > 0
+      ? video.creatorRating
+      : undefined;
 
   return (
     <div className="space-y-8 lg:space-y-10">
       {/* 1 — Product identity */}
       <section className="space-y-3">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
-          TRENDING FORMAT
+          {video.isTrending ? "TRENDING FORMAT" : "FORMAT"}
         </p>
 
         <h1 className="font-display text-4xl font-bold tracking-tight text-text sm:text-5xl">
           {video.title}
         </h1>
 
-        <div className="flex items-center gap-1.5 text-sm text-text-dim">
-          <span className="tracking-tight text-accent" aria-hidden>
-            ★★★★★
-          </span>
-          <span className="ml-1 tabular-nums">
-            {rating.toFixed(1)} creator rating
-          </span>
-        </div>
+        {rating != null ? (
+          <div className="flex items-center gap-1.5 text-sm text-text-dim">
+            <span className="tracking-tight text-accent" aria-hidden>
+              ★★★★★
+            </span>
+            <span className="ml-1 tabular-nums">
+              {rating.toFixed(1)} creator rating
+            </span>
+          </div>
+        ) : null}
 
         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">
           {categoryLine(video)}
@@ -123,16 +136,16 @@ export function ProductBuyColumn({ video }: { video: VideoProduct }) {
         </p>
       </section>
 
-      {/* 2 — Trend / social proof */}
-      {video.performance ? (
-        <ViralPerformanceCard performance={video.performance} />
+      {/* 2 — Trend / social proof (verified/manual metrics only) */}
+      {performance ? (
+        <ViralPerformanceCard performance={performance} />
       ) : null}
 
       {/* 3 — Why it works */}
       <WhyItWorks video={video} />
 
       {/* 4 — Format activity */}
-      <FormatActivity activity={video.activity} />
+      <FormatActivity activity={activity} />
 
       {/* 5 — Your purchase includes */}
       <WhatYouGet video={video} />

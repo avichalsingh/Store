@@ -43,6 +43,9 @@ export type PerformanceSecondary = {
   numeric?: number;
 };
 
+/** Public merchandising metrics: only `manual` / `verified` may render on storefront. */
+export type PerformanceDataMode = "demo" | "manual" | "verified";
+
 export type ProductPerformance = {
   type: PerformancePersonality;
   primaryMetric: string;
@@ -58,11 +61,11 @@ export type ProductPerformance = {
   momentumLabel?: string;
   /** Optional freeform engagement line; PDP derives from likes/shares when empty. */
   engagementText?: string;
-  mode: "demo";
+  mode: PerformanceDataMode;
 };
 
 export type CreatorActivity = {
-  mode: "demo";
+  mode: PerformanceDataMode;
   addedThisWeek: number;
   saved: number;
   last24h: number;
@@ -71,7 +74,7 @@ export type CreatorActivity = {
 };
 
 export type SocialProofRotation = {
-  mode: "demo";
+  mode: PerformanceDataMode;
   messages: string[];
 };
 

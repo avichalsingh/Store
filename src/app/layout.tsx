@@ -18,11 +18,36 @@ const dmSans = DM_Sans({
 
 export const metadata: Metadata = {
   title: {
-    default: "RHYTHM — AI Character Dance Videos",
-    template: "%s · RHYTHM",
+    default:
+      "PRAGVI — Buy AI Dance Videos & Creative Assets for Social Media",
+    template: "%s · PRAGVI",
   },
   description:
-    "Discover and purchase premium AI-generated character dance videos. Browse characters, collections, and viral moves.",
+    "Buy AI dance videos for Instagram Reels, ready-to-use AI videos for social media, AI images, and prompts. PRAGVI is a premium AI content marketplace for influencers, marketers, and agencies.",
+  applicationName: "PRAGVI",
+  keywords: [
+    "buy AI dance videos",
+    "AI dance videos for Instagram Reels",
+    "ready-to-use AI videos for social media",
+    "AI-generated videos for content creators",
+    "AI images for social media",
+    "AI prompts for content creation",
+    "AI content marketplace",
+    "social media content creation resources",
+  ],
+  openGraph: {
+    title: "PRAGVI — AI Content Marketplace for Creators",
+    description:
+      "Ready-to-use AI dance videos, images, and prompts for Instagram Reels, Shorts, and campaigns.",
+    siteName: "PRAGVI",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "PRAGVI — Buy AI Dance Videos for Social Media",
+    description:
+      "An AI content marketplace with ready-to-use dance videos, images, and prompts for creators.",
+  },
 };
 
 export default function RootLayout({

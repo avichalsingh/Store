@@ -104,6 +104,18 @@ export async function POST(request: Request) {
   const razorpayPaymentId = payment?.id || null;
   const razorpayOrderId = payment?.order_id || orderEntity?.id || null;
 
+  // Razorpay guidance: reject clearly stale webhook deliveries (replay window).
+  const createdAtRaw = (parsed as { created_at?: unknown }).created_at;
+  if (typeof createdAtRaw === "number" && Number.isFinite(createdAtRaw)) {
+    const ageSec = Math.floor(Date.now() / 1000) - createdAtRaw;
+    if (ageSec > 5 * 60) {
+      return NextResponse.json(
+        { ok: false, error: "Stale webhook event", code: "STALE_EVENT" },
+        { status: 400 },
+      );
+    }
+  }
+
   const headerEventId = request.headers.get("x-razorpay-event-id");
   const eventId =
     headerEventId?.trim() ||

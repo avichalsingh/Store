@@ -5,9 +5,11 @@ import { motion } from "framer-motion";
 import type { CreatorActivity } from "@/types";
 import { CountUp } from "@/components/motion/CountUp";
 import { useInViewOnce, usePrefersReducedMotion } from "@/hooks/useInViewOnce";
+import { publicCreatorActivity } from "@/catalog/publicPerformance";
 import { cn } from "@/lib/utils";
 
 export function FormatActivity({ activity }: { activity?: CreatorActivity }) {
+  const safe = publicCreatorActivity(activity);
   const { ref, inView } = useInViewOnce<HTMLDivElement>({ threshold: 0.3 });
   const reduced = usePrefersReducedMotion();
   const active = inView || reduced;
@@ -27,7 +29,7 @@ export function FormatActivity({ activity }: { activity?: CreatorActivity }) {
     };
   }, [active, reduced]);
 
-  if (!activity) return null;
+  if (!safe) return null;
 
   return (
     <motion.section
@@ -54,8 +56,8 @@ export function FormatActivity({ activity }: { activity?: CreatorActivity }) {
         <span>
           {active ? (
             <CountUp
-              to={activity.addedThisWeek}
-              template={String(activity.addedThisWeek)}
+              to={safe.addedThisWeek}
+              template={String(safe.addedThisWeek)}
               duration={900}
             />
           ) : (
@@ -71,7 +73,7 @@ export function FormatActivity({ activity }: { activity?: CreatorActivity }) {
           nudge && "animate-activity-nudge text-text",
         )}
       >
-        {activity.last24h} picked it up in the last 24 hours
+        {safe.last24h} picked it up in the last 24 hours
       </p>
     </motion.section>
   );

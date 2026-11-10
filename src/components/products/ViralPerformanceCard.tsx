@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import type { ProductPerformance } from "@/types";
 import { CountUp } from "@/components/motion/CountUp";
 import { useInViewOnce, usePrefersReducedMotion } from "@/hooks/useInViewOnce";
+import { publicPerformance } from "@/catalog/publicPerformance";
 import { cn } from "@/lib/utils";
 
 const GRAPH_PATH =
@@ -39,6 +40,7 @@ export function ViralPerformanceCard({
   performance: ProductPerformance;
   className?: string;
 }) {
+  const safe = publicPerformance(performance);
   const { ref, inView } = useInViewOnce<HTMLDivElement>({ threshold: 0.3 });
   const reduced = usePrefersReducedMotion();
   const active = inView || reduced;
@@ -50,20 +52,20 @@ export function ViralPerformanceCard({
     return () => window.clearTimeout(t);
   }, [active, reduced]);
 
-  if (!hasCompletePrimaryMetric(performance)) {
+  if (!safe || !hasCompletePrimaryMetric(safe)) {
     return null;
   }
 
-  const badge = performance.badge?.trim() || "TRENDING NOW";
-  const metricLabel = performance.primaryLabel?.trim() || "PLAYS";
+  const badge = safe.badge?.trim() || "TRENDING NOW";
+  const metricLabel = safe.primaryLabel?.trim() || "PLAYS";
   const insight =
-    performance.insight?.trim() ||
+    safe.insight?.trim() ||
     "Strong hook retention in the first 3 seconds.";
   const supporting =
-    performance.supportingText?.trim() ||
+    safe.supportingText?.trim() ||
     "This format is gaining momentum right now.";
   const momentum =
-    performance.momentumLabel?.trim() || "MOMENTUM IS CLIMBING ↑";
+    safe.momentumLabel?.trim() || "MOMENTUM IS CLIMBING ↑";
 
   return (
     <motion.div
@@ -99,8 +101,8 @@ export function ViralPerformanceCard({
             >
               {active ? (
                 <CountUp
-                  to={performance.primaryNumeric}
-                  template={performance.primaryMetric}
+                  to={safe.primaryNumeric}
+                  template={safe.primaryMetric}
                   duration={1100}
                 />
               ) : (
@@ -112,7 +114,7 @@ export function ViralPerformanceCard({
             </p>
 
             <p className="mt-4 text-sm tabular-nums text-text-dim">
-              {engagementLine(performance)}
+              {engagementLine(safe)}
             </p>
 
             <p className="mt-3 max-w-md text-[15px] font-medium leading-snug text-text">

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useCart } from "@/context/CartContext";
+import { usePurchases } from "@/context/PurchaseContext";
 import { useCatalog } from "@/catalog/useCatalog";
 import { formatPrice } from "@/lib/pricing";
 import {
@@ -24,6 +25,10 @@ type RazorpaySuccess = {
 
 type RazorpayCheckoutInstance = {
   open: () => void;
+  on: (
+    event: string,
+    handler: (response: { error?: { description?: string } }) => void,
+  ) => void;
 };
 
 declare global {
@@ -61,6 +66,7 @@ function loadRazorpayScript(): Promise<boolean> {
 
 export default function CheckoutPage() {
   const { items, clearCart } = useCart();
+  const { refreshPurchases } = usePurchases();
   const catalog = useCatalog();
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -79,21 +85,27 @@ export default function CheckoutPage() {
       try {
         const supabase = createClient();
         const { data } = await supabase.auth.getUser();
-        if (!cancelled) {
-          setUserEmail(data.user?.email ?? null);
-          setAuthReady(true);
+        if (cancelled) return;
+        const email = data.user?.email ?? null;
+        setUserEmail(email);
+        setAuthReady(true);
+        // Middleware also gates /checkout; this covers client navigations
+        // if the session is missing after hydration.
+        if (!email) {
+          router.replace(`/signin?next=${encodeURIComponent("/checkout")}`);
         }
       } catch {
         if (!cancelled) {
           setUserEmail(null);
           setAuthReady(true);
+          router.replace(`/signin?next=${encodeURIComponent("/checkout")}`);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   const onPay = useCallback(async () => {
     setError(null);
@@ -175,7 +187,7 @@ export default function CheckoutPage() {
         key: created.keyId,
         amount: amountPaise,
         currency: created.currency || "INR",
-        name: "Rhythm",
+        name: "PRAGVI",
         description: "Digital product purchase",
         order_id: created.razorpayOrderId,
         prefill: { email: userEmail },
@@ -202,6 +214,9 @@ export default function CheckoutPage() {
               );
               return;
             }
+            // Entitlements are created server-side in verify-payment; refresh
+            // Account/Library from that source of truth (never trust client-only).
+            await refreshPurchases();
             clearCart();
             router.push("/account");
           } catch {
@@ -211,15 +226,35 @@ export default function CheckoutPage() {
           }
         },
         modal: {
-          ondismiss: () => setBusy(false),
+          ondismiss: () => {
+            setBusy(false);
+            setError(
+              "Checkout was closed before payment completed. No charge was completed for this attempt — you can try again when ready.",
+            );
+          },
         },
+      });
+      rzp.on("payment.failed", (response: { error?: { description?: string } }) => {
+        setBusy(false);
+        setError(
+          response?.error?.description ||
+            "Payment failed. No purchase was unlocked. You can try again or use a different method.",
+        );
       });
       rzp.open();
     } catch {
       setError("Checkout failed");
       setBusy(false);
     }
-  }, [userEmail, paymentsConfigured, items, inrTotal, clearCart, router]);
+  }, [
+    userEmail,
+    paymentsConfigured,
+    items,
+    inrTotal,
+    clearCart,
+    refreshPurchases,
+    router,
+  ]);
 
   return (
     <div className="mx-auto max-w-3xl px-4 pb-20 pt-28 sm:px-6 lg:px-8">
@@ -241,28 +276,55 @@ export default function CheckoutPage() {
         prices.
       </div>
 
-      {!authReady ? null : !userEmail ? (
-        <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-text">
-          Sign in is required before payment. Use Supabase Auth on the account
-          page (magic link / email), then return here.
+      {!authReady ? (
+        <div className="mt-4 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
+          Checking session…
         </div>
-      ) : (
+      ) : userEmail ? (
         <div className="mt-4 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
           Signed in as{" "}
           <span className="font-medium text-text">{userEmail}</span>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-muted">
+          Redirecting to sign in…
         </div>
       )}
 
       {!paymentsConfigured ? (
         <div className="mt-4 rounded-2xl border border-border bg-surface-2 px-4 py-3 text-sm text-muted">
-          Razorpay is not configured in this environment. Set{" "}
+          Razorpay is not configured in this environment. For local staging,
+          add test keys to a gitignored{" "}
+          <code className="text-xs">.env.staging.razorpay</code> file (see
+          staging launcher), then restart{" "}
+          <code className="text-xs">npm run dev:staging</code>. Required keys:{" "}
           <code className="text-xs">NEXT_PUBLIC_RAZORPAY_KEY_ID</code>,{" "}
           <code className="text-xs">RAZORPAY_KEY_ID</code>,{" "}
           <code className="text-xs">RAZORPAY_KEY_SECRET</code>, and{" "}
-          <code className="text-xs">RAZORPAY_WEBHOOK_SECRET</code> for test mode.
-          Demo checkout has been removed.
+          <code className="text-xs">RAZORPAY_WEBHOOK_SECRET</code> (test mode
+          only).
         </div>
       ) : null}
+
+      <div className="mt-4 text-xs text-muted">
+        By paying you agree to our{" "}
+        <Link href="/terms" className="underline hover:text-text">
+          Terms
+        </Link>
+        ,{" "}
+        <Link href="/privacy" className="underline hover:text-text">
+          Privacy Policy
+        </Link>
+        ,{" "}
+        <Link href="/refunds" className="underline hover:text-text">
+          Refunds
+        </Link>
+        , and{" "}
+        <Link href="/delivery" className="underline hover:text-text">
+          Digital Delivery
+        </Link>{" "}
+        policies.
+      </div>
 
       {error ? (
         <div className="mt-4 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-text">

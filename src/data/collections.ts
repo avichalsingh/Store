@@ -83,7 +83,16 @@ const rawCollections: Collection[] = [
   },
 ];
 
-export const collections: Collection[] = rawCollections.map(enrichCollection);
+/** Strip seed conversion social proof — public surfaces only show verified metrics. */
+export const collections: Collection[] = rawCollections.map((collection) => {
+  const enriched = enrichCollection(collection);
+  return {
+    ...enriched,
+    performance: undefined,
+    activity: undefined,
+    socialProofText: undefined,
+  };
+});
 
 export const categories: Category[] = [
   {

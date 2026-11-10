@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Clapperboard,
   ExternalLink,
+  FileText,
   Film,
   LayoutDashboard,
   LayoutTemplate,
@@ -42,14 +43,13 @@ const groups: Array<{ label?: string; items: NavItem[] }> = [
       { href: "/admin/collections", label: "Collections", icon: Package },
       { href: "/admin/bundles", label: "Bundles", icon: ShoppingBag },
       { href: "/admin/media", label: "Media Library", icon: Film },
-      { href: "/admin/tools", label: "AI Tools", icon: Wrench },
-      { href: "/admin/tools/monitoring", label: "Tools Monitoring", icon: Activity },
     ],
   },
   {
     label: "Store",
     items: [
       { href: "/admin/homepage", label: "Homepage", icon: LayoutTemplate },
+      { href: "/admin/site-content", label: "Site Content", icon: FileText },
       { href: "/admin/campaigns", label: "Trending & Campaigns", icon: Megaphone },
       { href: "/admin/pricing", label: "Pricing & Offers", icon: Tag },
     ],
@@ -70,14 +70,6 @@ const groups: Array<{ label?: string; items: NavItem[] }> = [
 
 function isActive(pathname: string, href: string) {
   if (href === "/admin") return pathname === "/admin";
-  // Keep /admin/tools from highlighting when on monitoring
-  if (href === "/admin/tools") {
-    return (
-      pathname === "/admin/tools" ||
-      (pathname.startsWith("/admin/tools/") &&
-        !pathname.startsWith("/admin/tools/monitoring"))
-    );
-  }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -115,7 +107,7 @@ function NavBody({
         {!collapsed ? (
           <div className="min-w-0">
             <p className="truncate font-[family-name:var(--font-syne)] text-sm font-semibold tracking-wide">
-              RHYTHM
+              PRAGVI
             </p>
             <p className="inline-flex items-center gap-1 truncate text-[11px] text-[var(--admin-muted)]">
               <span className="rounded-full bg-[var(--admin-accent-soft)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[var(--admin-accent)]">

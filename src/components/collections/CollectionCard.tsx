@@ -50,9 +50,7 @@ export function CollectionCard({ collection, className }: CollectionCardProps) {
           {collection.title}
         </h3>
         <p className="line-clamp-2 text-sm text-muted">{collection.description}</p>
-        {collection.socialProofText && (
-          <p className="text-xs text-accent">{collection.socialProofText}</p>
-        )}
+        {/* Seed/demo social-proof lines are suppressed on public cards. */}
         <ProductPrice collection={collection} className="pt-1" />
       </div>
     </Link>

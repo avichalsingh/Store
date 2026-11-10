@@ -2,7 +2,8 @@
 
 import { cn } from "@/lib/utils";
 
-export type LicenseId = "standard" | "commercial";
+/** Personal-use only — commercial / extended licences are not offered. */
+export type LicenseId = "standard";
 
 const OPTIONS: Array<{
   id: LicenseId;
@@ -11,13 +12,9 @@ const OPTIONS: Array<{
 }> = [
   {
     id: "standard",
-    title: "Standard — Personal & social use",
-    description: "Use it in your personal or social content.",
-  },
-  {
-    id: "commercial",
-    title: "Commercial — Brand & client work",
-    description: "For brand and client projects (added at checkout later).",
+    title: "Personal use licence",
+    description:
+      "Personal, non-commercial use for your own projects and ordinary personal social publishing. Commercial licences are not offered.",
   },
 ];
 
