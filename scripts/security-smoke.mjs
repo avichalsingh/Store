@@ -60,6 +60,53 @@ if (!mw.includes("/api/admin") || !mw.includes("isAdminCookieHeaderValidEdge")) 
 if (!mw.includes("/admin/login")) fail("middleware must exempt /admin/login");
 ok("middleware admin gates present");
 
+const cspHeaders = readFileSync(join(root, "src/lib/security/headers.ts"), "utf8");
+if (!cspHeaders.includes("https://*.razorpay.com")) {
+  fail("CSP must allow Razorpay Checkout hosts (https://*.razorpay.com)");
+}
+if (!cspHeaders.includes("script-src") || !cspHeaders.includes("${RAZORPAY_HOST}")) {
+  fail("CSP script-src must include Razorpay host constant for checkout.js");
+}
+if (!cspHeaders.includes("frame-src") || !cspHeaders.includes("RAZORPAY_HOST")) {
+  fail("CSP frame-src must include Razorpay hosts for Checkout modal");
+}
+ok("CSP allows Razorpay Checkout origins");
+
+if (!cspHeaders.includes('COOP_DEFAULT = "same-origin"')) {
+  fail("default COOP must remain same-origin");
+}
+if (!cspHeaders.includes('COOP_STOREFRONT = "same-origin-allow-popups"')) {
+  fail("storefront COOP must be same-origin-allow-popups for Razorpay popups");
+}
+if (
+  !cspHeaders.includes("isStorefrontDocumentPath") ||
+  !cspHeaders.includes("resolveCrossOriginOpenerPolicy")
+) {
+  fail("COOP must be path-scoped via storefront document helpers");
+}
+for (const marker of ['"/admin"', '"/api"', '"/auth"']) {
+  if (!cspHeaders.includes(marker)) {
+    fail(`storefront COOP deny-list must exclude ${marker}`);
+  }
+}
+if (cspHeaders.includes("Cross-Origin-Embedder-Policy")) {
+  fail("must not set Cross-Origin-Embedder-Policy (would break Checkout isolation)");
+}
+if (
+  /COOP_[A-Z]+\s*=\s*["']unsafe-none["']/.test(cspHeaders) ||
+  /Cross-Origin-Opener-Policy["']\s*:\s*["']unsafe-none["']/.test(cspHeaders)
+) {
+  fail("must not configure COOP as unsafe-none");
+}
+if (
+  !mw.includes("applySecurityHeaders") ||
+  !mw.includes("{ pathname }") ||
+  !mw.includes("withSecurityHeaders(redirect, pathname)")
+) {
+  fail("middleware must pass pathname into security headers for COOP scoping");
+}
+ok("COOP is same-origin-allow-popups on storefront docs; same-origin on admin/api/auth");
+
 const workerIndex = readFileSync(join(root, "worker/src/index.ts"), "utf8");
 if (!workerIndex.includes("MEDIA_MASTERS_BUCKET") || !workerIndex.includes("..")) {
   fail("worker must validate master bucket/path");
@@ -86,6 +133,22 @@ if (
 ) {
   fail("download helper must deny without entitlement then sign");
 }
+if (
+  !dlHelper.includes("sanitizeDownloadFileName") ||
+  !dlHelper.includes("download: fileName")
+) {
+  fail("signed master URLs must request attachment download filename");
+}
+const clientDl = readFileSync(
+  join(root, "src/lib/commerce/clientMasterDownload.ts"),
+  "utf8",
+);
+if (
+  clientDl.includes("window.open") ||
+  /target\s*=\s*["']_blank["']/.test(clientDl)
+) {
+  fail("master download client must not open a new tab");
+}
 const dlCode = dl
   .split("\n")
   .filter((line) => !/^\s*(\*|\/\*|\*\/|\/\/)/.test(line.trim()) && !/^\s*\/\*/.test(line))
@@ -103,7 +166,38 @@ const checkout = readFileSync(
 if (checkout.includes("Place order (demo)") || checkout.includes("addPurchasesFromCart")) {
   fail("demo checkout path must remain disabled");
 }
+if (!checkout.includes("refreshPurchases") || !checkout.includes("verify-payment")) {
+  fail("checkout must refresh server purchases after verified payment");
+}
 ok("demo checkout disabled");
+
+const accountPurchases = readFileSync(
+  join(root, "src/app/api/account/purchases/route.ts"),
+  "utf8",
+);
+if (
+  !accountPurchases.includes("getUser") ||
+  !accountPurchases.includes('from("entitlements")')
+) {
+  fail("account purchases API must require auth and read entitlements");
+}
+const purchaseCtx = readFileSync(
+  join(root, "src/context/PurchaseContext.tsx"),
+  "utf8",
+);
+if (
+  !purchaseCtx.includes("/api/account/purchases") ||
+  purchaseCtx.includes("rhythm-purchases-v1")
+) {
+  fail("PurchaseContext must load from entitlements API, not localStorage");
+}
+if (
+  !purchaseCtx.includes("onAuthStateChange") ||
+  !purchaseCtx.includes("SIGNED_OUT")
+) {
+  fail("PurchaseContext must clear purchases on sign-out / account switch");
+}
+ok("account purchases load from verified entitlements");
 
 const webhook = readFileSync(
   join(root, "src/app/api/webhooks/razorpay/route.ts"),
@@ -129,7 +223,24 @@ if (!commerceMigSrc.includes("fulfill_paid_order")) {
 if (!commerceMigSrc.includes("processing_status")) {
   fail("commerce migration must track payment_events.processing_status");
 }
-ok("commerce migration present");
+const serviceRoleGrantsMig = join(
+  root,
+  "supabase/migrations/20261103000000_commerce_service_role_grants.sql",
+);
+const grantsSrc = existsSync(serviceRoleGrantsMig)
+  ? readFileSync(serviceRoleGrantsMig, "utf8")
+  : "";
+const hasServiceRoleOrdersGrant =
+  commerceMigSrc.includes(
+    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.orders TO service_role",
+  ) ||
+  grantsSrc.includes(
+    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.orders TO service_role",
+  );
+if (!hasServiceRoleOrdersGrant) {
+  fail("commerce migrations must GRANT DML on orders to service_role");
+}
+ok("commerce migration present (incl. service_role grants)");
 
 const fulfillSrc = readFileSync(
   join(root, "src/lib/commerce/fulfill.ts"),
