@@ -32,7 +32,7 @@ export function CollectionValueStack({
       `${collection.videoIds.length} ready-to-use dance videos`,
       "Vertical 9:16 format",
       "High-quality resolution",
-      "Instant access",
+      "Digital access after verified payment",
       "Commercial license options",
     ];
 

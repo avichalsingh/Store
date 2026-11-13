@@ -188,7 +188,7 @@ export function PackPurchaseCard({
         </div>
 
         <p className="mt-3 text-sm text-muted">
-          One-time purchase · Instant access
+          One-time purchase · Digital access after verified payment
         </p>
 
         {showTimer ? (

@@ -20,10 +20,10 @@ function defaultValueCards(video: VideoProduct): PdpValueCard[] {
         "Full 1080×1920 vertical video, ready for Reels, Shorts and TikTok.",
     },
     {
-      badge: "INSTANT ACCESS",
-      title: "No waiting. No processing.",
+      badge: "DIGITAL ACCESS",
+      title: "Unlock after verified payment",
       description:
-        "Your file becomes available immediately after checkout.",
+        "Entitled access appears in your Account / Library after successful payment verification.",
     },
     {
       badge: "POST-READY",
@@ -49,8 +49,8 @@ export function WhatYouGet({ video }: { video: VideoProduct }) {
     dimensionsSupporting: "Full HD vertical video",
     formatMain: video.format || "MP4",
     formatSupporting: "Ready-to-post file",
-    accessMain: video.access || "Instant access",
-    accessSupporting: "Download after checkout",
+    accessMain: video.access || "Digital access",
+    accessSupporting: "Download after verified payment",
     usageMain: "Personal-use licence",
     usageSupporting: "Personal use only — not for commercial resale",
   };

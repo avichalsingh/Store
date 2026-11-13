@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 
 const VALUE_ITEMS = [
   "Full structured prompt",
-  "Instant access",
+  "Digital access after verified payment",
   "Yours forever",
 ] as const;
 
@@ -150,7 +150,7 @@ export function PromptPurchaseCard({
         </div>
 
         <p className="mt-2 text-sm text-muted">
-          One-time purchase · Instant access
+          One-time purchase · Digital access after verified payment
         </p>
 
         {saleLive && countdown && !countdown.expired ? (

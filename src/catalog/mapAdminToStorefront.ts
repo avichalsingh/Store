@@ -362,7 +362,7 @@ export function adminProductToCatalog(
         asset?.master.resolution ||
         product.resolution,
       format: product.aiImageData?.format || product.format,
-      access: product.access || "Instant access",
+      access: product.access || "Digital access",
       previewImages: previews.length ? previews : cover ? [cover] : [],
       salesEyebrow: product.campaign?.label || undefined,
       salesHeadline: product.campaign?.headline || undefined,
@@ -438,7 +438,7 @@ function mapFileDetails(p: AdminProduct): VideoProduct["fileDetails"] {
       fd?.dimensionsSupporting?.trim() || "Full HD vertical video",
     formatMain: (p.format || "MP4").trim() || "MP4",
     formatSupporting: fd?.formatSupporting?.trim() || "Ready-to-post file",
-    accessMain: (p.access || "Instant access").trim() || "Instant access",
+    accessMain: (p.access || "Digital access").trim() || "Digital access",
     accessSupporting:
       fd?.accessSupporting?.trim() || "Download after checkout",
     usageMain: fd?.usageMain?.trim() || "Personal + social",
@@ -569,7 +569,7 @@ export function adminProductToVideo(
     collectionIds: product.collectionIds ?? [],
     createdAt: product.createdAt.slice(0, 10),
     format: product.format || "MP4",
-    access: product.access || "Instant access",
+    access: product.access || "Digital access",
     performance: mapPerformance(product),
     activity: mapActivity(product),
     showCardMetrics: false,

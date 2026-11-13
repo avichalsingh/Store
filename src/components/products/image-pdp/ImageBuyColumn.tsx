@@ -286,7 +286,7 @@ export function ImageBuyColumn({
         <div className="flex flex-wrap gap-2">
           <MetaChip>{product.format || "PNG"}</MetaChip>
           <MetaChip>{formatRes(product.resolution)}</MetaChip>
-          <MetaChip accent>⚡ Instant download</MetaChip>
+          <MetaChip accent>⚡ Digital download</MetaChip>
         </div>
       </section>
 
@@ -366,7 +366,7 @@ export function ImageBuyColumn({
 
         <ul className="mt-5 space-y-1.5 text-xs font-medium text-muted">
           {[
-            "Instant download after checkout",
+            "Digital download after verified payment",
             "Full-resolution PNG",
             "Ready to use in your next creation",
           ].map((line) => (
@@ -390,14 +390,14 @@ export function ImageBuyColumn({
           </button>
         </div>
         <p className="mt-2 text-center text-xs font-medium text-muted">
-          Instant access. No waiting.
+          Digital access after verified payment. Personal-use licence.
         </p>
 
         <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border/80 pt-4 text-center">
           {[
-            { icon: "⚡", label: "Download instantly" },
+            { icon: "⚡", label: "Download after payment" },
             { icon: "🎨", label: "Ready to create with" },
-            { icon: "🔒", label: "Yours after checkout" },
+            { icon: "🔒", label: "Personal-use licence" },
           ].map((item) => (
             <p
               key={item.label}

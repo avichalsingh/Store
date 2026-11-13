@@ -9,7 +9,7 @@ import { usePrefersReducedMotion } from "@/hooks/useInViewOnce";
 const DEFAULT_MICRO = [
   "⏳ Before the launch price changes",
   "🔥 Already getting creator attention",
-  "⚡ Instant access after purchase",
+  "⚡ Digital access after verified payment",
   "↗ Get in before the trend gets familiar",
 ];
 

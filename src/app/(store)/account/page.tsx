@@ -199,7 +199,8 @@ export default function AccountPage() {
             <div>
               <h2 className="font-display text-2xl font-bold">My Library</h2>
               <p className="mt-1 text-sm text-muted">
-                Instant access to everything you&apos;ve purchased.
+                Digital access to everything you&apos;ve purchased after verified
+                payment.
               </p>
 
               <div className="mt-6 flex flex-wrap gap-2">

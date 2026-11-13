@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  LEGAL_CONFIRMED_FACTS_SUMMARY,
   LEGAL_MISSING_BUSINESS_DETAILS,
   LEGAL_NAV,
   type LegalDoc,
@@ -30,10 +31,9 @@ export function LegalDocumentPage({
           Draft disclosures — not production-final
         </p>
         <p className="mt-1">
-          Confirmed facts only: PRAGVI brand; proprietor Avichal Prakash;
-          individual home-based trader; not GST-registered; email-only support at
-          support@pragvi.com; personal-use licence. Bracketed fields below are
-          unresolved blockers and are not confirmed business details.
+          Confirmed facts only: {LEGAL_CONFIRMED_FACTS_SUMMARY} Bracketed fields
+          below are unresolved blockers and are not confirmed business details.
+          Missing facts are not filled with guesses.
         </p>
         <ul className="mt-2 list-disc space-y-1 pl-4">
           {LEGAL_MISSING_BUSINESS_DETAILS.map((item) => (

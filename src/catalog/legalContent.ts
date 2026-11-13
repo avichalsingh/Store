@@ -4,12 +4,15 @@
  * Confirmed facts (do not invent beyond these):
  * - Brand / trading name: PRAGVI
  * - Proprietor legal name: Avichal Prakash
- * - Structure: Individual, home-based
+ * - Structure: Individual (home-based). Do not describe as a registered
+ *   sole proprietorship or other registered business entity on these pages.
  * - Support email: support@pragvi.com
  * - Support channel: email only (phone support not offered)
  * - GST: not registered (no GSTIN)
  * - Domain intent: pragvi.com
  * - Residential address: private — not authorized for public disclosure
+ * - Catalogue: digital products (videos, AI images, prompts, collections/bundles
+ *   and related listed digital assets). No physical shipment.
  * - Product licence: personal use only (no commercial / extended licence offered)
  *
  * Policy decisions applied in this draft:
@@ -73,9 +76,11 @@ const PLACEHOLDER_REFUND_PROCESSING_TIMEFRAME =
 
 const DELIVERY_BY_PRODUCT_TYPE = `Current application fulfilment (subject to entitlement after verified payment):
 • Videos — entitled master access through Account / Library via short-lived signed download links.
-• Images, prompts, captions, and similar library content — entitled in-account retrieval through authenticated library content APIs.
-• Bundles and collections — unlock the entitled component products configured for that offering.
-Previews on the storefront may be watermarked, shortened, or limited and are not the purchased master.`;
+• AI images, prompts, and similar library content — entitled in-account retrieval through authenticated library content APIs.
+• Collections and bundles — unlock the entitled component products configured for that offering.
+• Related digital catalogue items (for example caption packs, where listed) — entitled access according to that product type.
+Previews on the storefront may be watermarked, shortened, or limited and are not the purchased master.
+There is no physical parcel shipment for ordinary catalogue purchases.`;
 
 const PLACEHOLDER_RETENTION =
   "[DATA RETENTION PERIODS BY CATEGORY — UNRESOLVED; DO NOT INVENT NUMERIC SCHEDULES]";
@@ -92,7 +97,7 @@ You do not acquire copyright ownership of the underlying work merely by purchasi
 
 Commercial, extended, agency, resale, or redistribution licences are not offered at this time. You must not, without prior written permission: use the files for commercial client work or paid campaigns as a sold asset; resell the files; redistribute or publicly share masters; sublicense; upload the masters to asset marketplaces; or repackage the content for others as a competing product.`;
 
-const BUSINESS_STATUS = `PRAGVI is a brand and trading name used by an individual operating a home-based digital-products business in India. PRAGVI is not described on these pages as a registered company, LLP, or other incorporated legal entity. The proprietor's legal name for formal documents is ${PROPRIETOR_LEGAL_NAME}. PRAGVI is not registered under GST; no GSTIN is displayed. Customer support email: ${SUPPORT_EMAIL}. Support channel: email only. Intended public website: pragvi.com.`;
+const BUSINESS_STATUS = `PRAGVI is a brand and trading name used by an Individual operating a home-based digital-products business in India. Business classification on these pages: Individual — not a registered company, LLP, partnership firm, or registered sole-proprietorship entity. The proprietor's legal name for formal documents is ${PROPRIETOR_LEGAL_NAME}. PRAGVI is not registered under GST; no GSTIN is displayed. Customer support email: ${SUPPORT_EMAIL}. Support channel: email only. Intended public website: pragvi.com.`;
 
 
 export const LEGAL_DOCS: Record<LegalDocId, LegalDoc> = {
@@ -183,11 +188,11 @@ Until retention schedules are confirmed, treat the following as descriptive only
       },
       {
         heading: "The service",
-        body: "PRAGVI sells digital creative products that may include videos, images, prompts, captions, collections, and bundles. Listings and fulfilment are for PRAGVI catalogue products only in this release.",
+        body: "PRAGVI sells intangible digital creative products. The catalogue may include videos, AI images, prompts, collections, bundles, and related listed digital assets. There is no physical shipping for ordinary catalogue purchases. Listings and fulfilment in this release are for PRAGVI catalogue products only.",
       },
       {
         heading: "Accounts",
-        body: "Some features, including checkout and the purchase library, require a signed-in account. Provide accurate information, keep your login secure, and tell us promptly at support@pragvi.com if you believe your account was used without authorisation. We may suspend accounts used for fraud, abuse, or breach of these Terms.",
+        body: `Some features, including checkout and the purchase library, require a signed-in account. Provide accurate information, keep your login secure, and tell us promptly at ${SUPPORT_EMAIL} if you believe your account was used without authorisation. We may suspend accounts used for fraud, abuse, or breach of these Terms.`,
       },
       {
         heading: "Product descriptions and pricing",
@@ -297,7 +302,7 @@ Bank or payment-provider posting times are outside PRAGVI’s direct control.`,
     sections: [
       {
         heading: "No physical shipment",
-        body: "PRAGVI catalogue products are digital. We do not ship parcels or require a delivery address for ordinary catalogue fulfilment. This page is the delivery / shipping disclosure for digital goods.",
+        body: "PRAGVI catalogue products are intangible digital goods or digital access (videos, AI images, prompts, collections/bundles, and related listed digital assets). We do not ship parcels or require a delivery address for ordinary catalogue fulfilment. This page is the delivery / shipping disclosure for digital goods.",
       },
       {
         heading: "When fulfilment starts",
@@ -347,9 +352,11 @@ This page does not publish a guaranteed response-time promise for ordinary suppo
       {
         heading: "Business identity",
         body: `Brand / trading name: PRAGVI
-Business structure: Individual (home-based)
+Business classification: Individual (home-based digital-products trader)
+Not described on these pages as: a registered company, LLP, partnership firm, or registered sole-proprietorship entity
 Proprietor's legal name: ${PROPRIETOR_LEGAL_NAME}
 GST: Not registered — no GSTIN is displayed
+What we sell: intangible digital products (videos, AI images, prompts, collections/bundles, and related listed digital assets). No ordinary physical parcel shipping.
 ${PLACEHOLDER_TAX}
 Principal business address / lawful public disclosure: ${PLACEHOLDER_PUBLIC_BUSINESS_ADDRESS}
 
@@ -397,3 +404,7 @@ export const LEGAL_MISSING_BUSINESS_DETAILS = [
   "Governing jurisdiction / forum in India",
   "Any applicable tax disclosures beyond confirmed non-registration for GST",
 ] as const;
+
+/** Confirmed storefront facts for banners and KYC copy — do not invent beyond these. */
+export const LEGAL_CONFIRMED_FACTS_SUMMARY =
+  "PRAGVI brand/trading name; proprietor Avichal Prakash; Individual home-based trader (not a registered sole proprietorship on these pages); not GST-registered; email-only support at support@pragvi.com; digital products with delivery after verified payment; personal-use licence by default.";

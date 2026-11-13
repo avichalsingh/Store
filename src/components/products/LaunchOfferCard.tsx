@@ -161,7 +161,7 @@ export function LaunchOfferCard({
                 </button>
               </div>
               <p className="text-center text-xs text-muted">
-                Instant access after purchase
+                Digital access after verified payment
               </p>
             </div>
           ) : null}

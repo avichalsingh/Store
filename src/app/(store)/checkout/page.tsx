@@ -306,24 +306,42 @@ export default function CheckoutPage() {
         </div>
       ) : null}
 
-      <div className="mt-4 text-xs text-muted">
-        By paying you agree to our{" "}
-        <Link href="/terms" className="underline hover:text-text">
-          Terms
-        </Link>
-        ,{" "}
-        <Link href="/privacy" className="underline hover:text-text">
-          Privacy Policy
-        </Link>
-        ,{" "}
-        <Link href="/refunds" className="underline hover:text-text">
-          Refunds
-        </Link>
-        , and{" "}
-        <Link href="/delivery" className="underline hover:text-text">
-          Digital Delivery
-        </Link>{" "}
-        policies.
+      <div className="mt-4 space-y-2 text-xs text-muted">
+        <p>
+          You are buying intangible digital products. After successful payment
+          verification, entitled access appears in your signed-in Account /
+          Library. There is no physical parcel shipping for ordinary catalogue
+          purchases. Standard purchases are personal-use licences only — not
+          commercial rights. Change-of-mind refunds are not offered after
+          successful digital delivery, subject to mandatory legal remedies (see
+          Refunds). Support:{" "}
+          <a
+            href="mailto:support@pragvi.com"
+            className="underline hover:text-text"
+          >
+            support@pragvi.com
+          </a>
+          .
+        </p>
+        <p>
+          By paying you agree to our{" "}
+          <Link href="/terms" className="underline hover:text-text">
+            Terms
+          </Link>
+          ,{" "}
+          <Link href="/privacy" className="underline hover:text-text">
+            Privacy Policy
+          </Link>
+          ,{" "}
+          <Link href="/refunds" className="underline hover:text-text">
+            Refunds
+          </Link>
+          , and{" "}
+          <Link href="/delivery" className="underline hover:text-text">
+            Digital Delivery
+          </Link>{" "}
+          policies.
+        </p>
       </div>
 
       {error ? (

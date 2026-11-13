@@ -47,7 +47,7 @@ export function CollectionValueSection() {
             <li>
               ✓ {collection.unreleasedCount ?? 1} unreleased format variations
             </li>
-            <li>✓ Vertical 9:16 · Instant access</li>
+            <li>✓ Vertical 9:16 · Digital access after payment</li>
           </ul>
 
           <div className="mt-8 flex flex-wrap items-end gap-4">

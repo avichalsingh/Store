@@ -138,7 +138,7 @@ export function VideoOrderSummary({
         </button>
       </div>
       <p className="text-center text-xs text-muted">
-        🔒 Secure checkout · Instant access
+        🔒 Secure checkout · Digital access after verified payment
       </p>
     </section>
   );

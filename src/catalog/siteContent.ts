@@ -212,7 +212,7 @@ export const DEFAULT_SITE_FOOTER: SiteFooterConfig = {
     "Buy AI dance videos, AI images for social media, prompts, and creator-ready digital assets — a premium marketplace for Reels, Shorts, and campaigns.",
   followLabel: "Follow us",
   copyright: "© {year} PRAGVI. All rights reserved.",
-  secondaryLine: "Digital content · Instant delivery",
+  secondaryLine: "Digital products · Access after verified payment",
   social: [
     { id: "instagram", label: "Instagram (placeholder)", href: "", enabled: false },
     { id: "youtube", label: "YouTube (placeholder)", href: "", enabled: false },
@@ -259,7 +259,7 @@ export const DEFAULT_SITE_ABOUT: SiteAboutConfig = {
   eyebrow: "About",
   title: "Create more. Imagine beyond.",
   intro:
-    "PRAGVI is a premium creative marketplace for AI dance videos, images, prompts, and related digital assets. It is operated as an individual, home-based business under the PRAGVI brand and trading name — not as a separately registered company on these pages. Browse the catalogue, preview what inspires you, and unlock ready-to-use creative assets after purchase. Customer support: support@pragvi.com.",
+    "PRAGVI is a premium creative marketplace for AI dance videos, AI images, prompts, collections/bundles, and related digital assets. It is operated as an Individual home-based business under the PRAGVI brand and trading name — not as a registered company or registered sole-proprietorship entity on these pages. Browse the catalogue, preview what inspires you, and unlock digital access after successful payment verification. Customer support is email-only at support@pragvi.com.",
   faqItems: [
     {
       id: "faq-library",
@@ -273,7 +273,7 @@ export const DEFAULT_SITE_ABOUT: SiteAboutConfig = {
       id: "faq-refunds",
       question: "Can I get a refund?",
       answer:
-        "PRAGVI uses a strict digital-product approach: change-of-mind refunds are not offered after successful digital delivery, subject to applicable law. Failed delivery, duplicate charges, defective files, material misdescription, and unauthorised payments are reviewed under the Refund and Cancellation Policy.",
+        "PRAGVI uses a strict digital-product approach: change-of-mind refunds are not offered after successful digital delivery, subject to mandatory rights under applicable law. Failed delivery, duplicate charges, defective files, material misdescription, and unauthorised payments are reviewed under the Refund and Cancellation Policy.",
       enabled: true,
       order: 1,
     },
@@ -282,7 +282,7 @@ export const DEFAULT_SITE_ABOUT: SiteAboutConfig = {
     {
       id: "faq",
       heading: "FAQ",
-      body: "After payment is successfully verified, entitled products appear in your signed-in Account / Library. Access depends on product type.",
+      body: "After payment is successfully verified, entitled digital products appear in your signed-in Account / Library. Access depends on product type. There is no physical parcel shipping for ordinary catalogue purchases.",
       enabled: true,
       order: 0,
     },
@@ -296,7 +296,7 @@ export const DEFAULT_SITE_ABOUT: SiteAboutConfig = {
     {
       id: "terms",
       heading: "Terms",
-      body: "Full Terms & Conditions are at /terms. Proprietor legal name is confirmed (Avichal Prakash). Address disclosure and jurisdiction fields stay marked until confirmed.",
+      body: "Full Terms & Conditions are at /terms. Proprietor legal name is confirmed (Avichal Prakash). Address disclosure and jurisdiction fields stay marked until confirmed — they are not invented on this page.",
       enabled: true,
       order: 2,
     },
