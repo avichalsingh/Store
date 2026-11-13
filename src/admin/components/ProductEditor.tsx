@@ -20,10 +20,15 @@ import {
 } from "@/admin/components/ui/AdminField";
 import { AdminPageHeader } from "@/admin/components/ui/AdminPageHeader";
 import { AdminSaveBar } from "@/admin/components/ui/AdminSaveBar";
-import { discountPct, slugify, uid } from "@/admin/lib/format";
-import { normalizeAdminProduct } from "@/admin/lib/normalizeProduct";
+import { discountPct, slugify } from "@/admin/lib/format";
 import { fetchAdminPrivatePayload } from "@/admin/lib/privateProductPayloads";
 import { publishProductToCatalog } from "@/admin/lib/publishToCatalog";
+import {
+  consumeNewProductSeed,
+  createSampleAdminProduct,
+  stashNewProductSeed,
+  switchSampleProductType,
+} from "@/admin/lib/sampleProductDefaults";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import type { AdminProduct } from "@/admin/types";
 import {
@@ -32,73 +37,15 @@ import {
   emptyPromptData,
 } from "@/catalog/productPayloads";
 import {
+  PRODUCT_TYPES,
   getProductTypeConfig,
+  isProductType,
   type ProductType,
 } from "@/catalog/productTypes";
 import { mergePrivatePaidProductPayload } from "@/catalog/publicSafeProduct";
 import { Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-
-function blankProduct(type: ProductType = "VIDEO"): AdminProduct {
-  const id = uid(type === "VIDEO" ? "vid" : type.toLowerCase().slice(0, 3));
-  return normalizeAdminProduct({
-    id,
-    name: "",
-    slug: "",
-    productType: type,
-    characterId: undefined,
-    characterName: undefined,
-    category:
-      type === "VIDEO"
-        ? "Hip Hop"
-        : type === "CAPTION_PACK"
-            ? "Caption Packs"
-            : type === "PROMPT"
-              ? "Prompts"
-              : type === "AI_IMAGE"
-                ? "AI Images"
-                : "Bundles",
-    collectionIds: [],
-    shortDescription: "",
-    description: "",
-    tags: [],
-    status: "draft",
-    isTrending: false,
-    isFeatured: false,
-    media: {
-      thumbnail: type === "VIDEO" ? "/media/videos/pulse-drop.jpg" : "",
-      downloadFileName: "",
-      downloadFileSize: "",
-    },
-    pricing: {
-      INR: { regularPrice: 999, currentPrice: 999 },
-      USD: { regularPrice: 12.99, currentPrice: 12.99 },
-    },
-    offer: { enabled: false, label: "", startDate: "", endDate: "" },
-    availability: { mode: "unlimited" },
-    duration: type === "VIDEO" ? "0:15" : "",
-    resolution: type === "VIDEO" ? "1080x1920" : "",
-    format: type === "VIDEO" ? "MP4" : "",
-    access: type === "VIDEO" ? "Instant access" : "Instant download",
-    licenses:
-      type === "VIDEO"
-        ? [
-            {
-              id: "lic-personal",
-              name: "Personal",
-              description: "Social posts & personal projects",
-              priceAdjustment: 0,
-            },
-          ]
-        : [],
-    sales: 0,
-    revenueInr: 0,
-    relationships: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-}
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function offerCountdown(end?: string) {
   if (!end) return null;
@@ -136,16 +83,28 @@ export function ProductEditor({
   const [publishProgressLabel, setPublishProgressLabel] = useState<string | null>(
     null,
   );
+  /** New-product drafts boot once; type changes are handled in-editor (not via remount wipe). */
+  const newProductBootedRef = useRef(false);
 
   useEffect(() => {
     if (!hydrated) return;
     if (productId && !existing) return;
+    if (!productId && newProductBootedRef.current) return;
     let cancelled = false;
 
     const init = async () => {
+      const requestedType = productType ?? "VIDEO";
+      const seeded =
+        !existing && !productId ? consumeNewProductSeed(requestedType) : null;
+      const firstCharacter = characters[0];
       const initial = existing
         ? structuredClone(existing)
-        : blankProduct(productType ?? "VIDEO");
+        : seeded ??
+          createSampleAdminProduct(requestedType, {
+            characterId: firstCharacter?.id,
+            characterName: firstCharacter?.name,
+            existingSlugs: products.map((p) => p.slug),
+          });
 
       // Shared CMS state is public-safe. Hydrate private seed bodies only into
       // this editor draft via the authenticated admin API — never into
@@ -165,7 +124,9 @@ export function ProductEditor({
 
       if (cancelled) return;
       setDraft(initial);
-      setBaseline(JSON.stringify(initial));
+      // New products start dirty so Save draft can persist the sample without a no-op edit.
+      setBaseline(productId ? JSON.stringify(initial) : "");
+      if (!productId) newProductBootedRef.current = true;
     };
 
     void init();
@@ -198,9 +159,16 @@ export function ProductEditor({
   const type = draft.productType;
   const typeConfig = getProductTypeConfig(type);
   const isVideo = type === "VIDEO";
+  const isNewProduct = !productId;
 
   if (type === "BUNDLE") {
-    return <BundleEditor productId={productId} isNew={!productId} />;
+    return (
+      <BundleEditor
+        productId={productId}
+        isNew={isNewProduct}
+        seedDraft={isNewProduct ? draft : undefined}
+      />
+    );
   }
 
   const set = <K extends keyof AdminProduct>(
@@ -208,6 +176,23 @@ export function ProductEditor({
     value: AdminProduct[K],
   ) => {
     setDraft((d) => (d ? { ...d, [key]: value } : d));
+  };
+
+  const changeProductType = (nextType: ProductType) => {
+    if (!isNewProduct || nextType === draft.productType) return;
+    const switched = switchSampleProductType(draft, nextType, {
+      characterId: characters[0]?.id,
+      characterName: characters[0]?.name,
+      existingSlugs: products.map((p) => p.slug),
+    });
+    if (nextType === "BUNDLE") {
+      stashNewProductSeed(switched);
+      setDraft(switched);
+      router.replace(`/admin/products/new?type=BUNDLE`);
+      return;
+    }
+    setDraft(switched);
+    router.replace(`/admin/products/new?type=${nextType}`);
   };
 
   const save = async (status?: AdminProduct["status"]) => {
@@ -351,7 +336,23 @@ export function ProductEditor({
               />
             </AdminField>
             <AdminField label="Product type">
-              <AdminInput value={typeConfig.label} disabled readOnly />
+              {isNewProduct ? (
+                <AdminSelect
+                  value={type}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (isProductType(next)) changeProductType(next);
+                  }}
+                >
+                  {PRODUCT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {getProductTypeConfig(t).label}
+                    </option>
+                  ))}
+                </AdminSelect>
+              ) : (
+                <AdminInput value={typeConfig.label} disabled readOnly />
+              )}
             </AdminField>
             {isVideo ? (
               <AdminField label="Character">

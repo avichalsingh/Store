@@ -32,14 +32,24 @@ import {
   formatInr,
   formatUsd,
   slugify,
-  uid,
 } from "@/admin/lib/format";
 import { normalizeAdminProduct } from "@/admin/lib/normalizeProduct";
 import { publishProductToCatalog } from "@/admin/lib/publishToCatalog";
+import {
+  consumeNewProductSeed,
+  createSampleAdminProduct,
+  stashNewProductSeed,
+  switchSampleProductType,
+} from "@/admin/lib/sampleProductDefaults";
 import { useAdmin } from "@/admin/store/AdminProvider";
 import type { AdminProduct } from "@/admin/types";
 import type { BundleData } from "@/catalog/productPayloads";
-import { getProductTypeConfig } from "@/catalog/productTypes";
+import {
+  PRODUCT_TYPES,
+  getProductTypeConfig,
+  isProductType,
+  type ProductType,
+} from "@/catalog/productTypes";
 import {
   Check,
   ChevronRight,
@@ -47,42 +57,17 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-
-function blankBundle(): AdminProduct {
-  return normalizeAdminProduct({
-    id: uid("bun"),
-    name: "",
-    slug: "",
-    productType: "BUNDLE",
-    category: "Bundles",
-    shortDescription: "",
-    description: "",
-    tags: [],
-    status: "draft",
-    isTrending: false,
-    isFeatured: false,
-    media: { thumbnail: "" },
-    pricing: {
-      INR: { regularPrice: 999, currentPrice: 799 },
-      USD: { regularPrice: 12.99, currentPrice: 9.99 },
-    },
-    offer: { enabled: false, label: "", startDate: "", endDate: "" },
-    availability: { mode: "unlimited" },
-    access: "Instant unlock",
-    relationships: [],
-    bundleData: { includedProductIds: [] },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-}
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export function BundleEditor({
   productId,
   isNew,
+  seedDraft,
 }: {
   productId?: string;
   isNew?: boolean;
+  /** Pre-filled draft from ProductEditor type switch / sample bootstrap. */
+  seedDraft?: AdminProduct;
 }) {
   const router = useRouter();
   const { products, characters, upsertProduct, hydrated, mediaAssets, pushToast } =
@@ -103,17 +88,29 @@ export function BundleEditor({
   const [addOpen, setAddOpen] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const newBundleBootedRef = useRef(false);
 
   useEffect(() => {
     if (!hydrated) return;
     if (!isNew && productId && !existing) return;
+    if (isNew && newBundleBootedRef.current) return;
+    const seeded =
+      isNew && seedDraft?.productType === "BUNDLE"
+        ? seedDraft
+        : isNew
+          ? consumeNewProductSeed("BUNDLE")
+          : null;
     const initial = existing
       ? structuredClone(existing)
-      : blankBundle();
+      : seeded ??
+        createSampleAdminProduct("BUNDLE", {
+          existingSlugs: products.map((p) => p.slug),
+        });
     setDraft(initial);
-    setBaseline(JSON.stringify(initial));
-    setSlugTouched(!!existing?.slug);
+    setBaseline(isNew ? "" : JSON.stringify(initial));
+    setSlugTouched(Boolean(existing?.slug || (isNew && initial.slug)));
     setSavedAt(existing?.updatedAt ?? null);
+    if (isNew) newBundleBootedRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, productId, isNew]);
 
@@ -185,6 +182,15 @@ export function BundleEditor({
 
   const patch = (partial: Partial<AdminProduct>) => {
     setDraft((d) => (d ? { ...d, ...partial } : d));
+  };
+
+  const changeProductType = (nextType: ProductType) => {
+    if (!isNew || !draft || nextType === "BUNDLE") return;
+    const switched = switchSampleProductType(draft, nextType, {
+      existingSlugs: products.map((p) => p.slug),
+    });
+    stashNewProductSeed(switched);
+    router.replace(`/admin/products/new?type=${nextType}`);
   };
 
   const setIncluded = (ids: string[]) => {
@@ -347,11 +353,27 @@ export function BundleEditor({
                 />
               </AdminField>
               <AdminField label="Product type">
-                <AdminInput
-                  value={getProductTypeConfig("BUNDLE").label}
-                  disabled
-                  readOnly
-                />
+                {isNew ? (
+                  <AdminSelect
+                    value="BUNDLE"
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (isProductType(next)) changeProductType(next);
+                    }}
+                  >
+                    {PRODUCT_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {getProductTypeConfig(t).label}
+                      </option>
+                    ))}
+                  </AdminSelect>
+                ) : (
+                  <AdminInput
+                    value={getProductTypeConfig("BUNDLE").label}
+                    disabled
+                    readOnly
+                  />
+                )}
               </AdminField>
               <AdminField label="Category">
                 <AdminInput
